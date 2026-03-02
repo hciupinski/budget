@@ -27,7 +27,8 @@ function clearSessionCookies(response: NextResponse): void {
 }
 
 export async function proxyBudgetApi(path: string, init: RequestInit = {}): Promise<NextResponse> {
-  const token = cookies().get(SESSION_COOKIE)?.value;
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
 
   if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

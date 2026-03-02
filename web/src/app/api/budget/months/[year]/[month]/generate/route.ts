@@ -1,7 +1,12 @@
 import { proxyBudgetApi } from "@/lib/api-proxy";
 
-export async function POST(_: Request, context: { params: { year: string; month: string } }) {
-  return proxyBudgetApi(`/api/budget/months/${context.params.year}/${context.params.month}/generate`, {
+export async function POST(
+  _: Request,
+  context: { params: Promise<{ year: string; month: string }> }
+) {
+  const { year, month } = await context.params;
+
+  return proxyBudgetApi(`/api/budget/months/${year}/${month}/generate`, {
     method: "POST"
   });
 }

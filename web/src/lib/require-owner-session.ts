@@ -8,7 +8,8 @@ type OwnerSession = {
 };
 
 export async function requireOwnerSession(): Promise<OwnerSession> {
-  const token = cookies().get("budget_session")?.value;
+  const cookieStore = await cookies();
+  const token = cookieStore.get("budget_session")?.value;
 
   if (!token) {
     redirect("/login");
@@ -30,7 +31,8 @@ export async function requireOwnerSession(): Promise<OwnerSession> {
 }
 
 export async function hasValidOwnerSession(): Promise<boolean> {
-  const token = cookies().get("budget_session")?.value;
+  const cookieStore = await cookies();
+  const token = cookieStore.get("budget_session")?.value;
 
   if (!token) {
     return false;
