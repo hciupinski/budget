@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/api/" />
+  <Folder Name="/api/src/">
+    <Project Path="api/src/Budget.Api/Budget.Api.csproj" />
+  </Folder>
+  <Folder Name="/api/tests/">
+    <Project Path="api/tests/Budget.Api.Tests/Budget.Api.Tests.csproj" />
+  </Folder>
+  <Folder Name="/worker/" />
+  <Folder Name="/worker/src/">
+    <Project Path="worker/src/Budget.Worker/Budget.Worker.csproj" />
+  </Folder>
+  <Folder Name="/worker/tests/">
+    <Project Path="worker/tests/Budget.Worker.Tests/Budget.Worker.Tests.csproj" />
+  </Folder>
+</Solution>

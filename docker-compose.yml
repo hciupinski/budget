@@ -1,0 +1,86 @@
+name: budget
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: budget-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: budget-adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/src/Budget.Api/Dockerfile
+    container_name: budget-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      OwnerAccount__Email: ${OWNER_EMAIL}
+      OwnerAccount__Password: ${OWNER_PASSWORD}
+      Jwt__Issuer: ${JWT_ISSUER}
+      Jwt__Audience: ${JWT_AUDIENCE}
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__ExpiresMinutes: ${JWT_EXPIRES_MINUTES}
+      AllowedOrigins: ${ALLOWED_ORIGINS}
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/src/Budget.Worker/Dockerfile
+    container_name: budget-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      Worker__IntervalSeconds: ${WORKER_INTERVAL_SECONDS}
+    ports:
+      - "8082:8082"
+
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+    container_name: budget-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      API_BASE_URL: http://api:8080
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

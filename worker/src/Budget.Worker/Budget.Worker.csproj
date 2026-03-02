@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Budget.Worker-8c1255d9-ac81-468d-935d-6a04c4f43b44</UserSecretsId>
+  </PropertyGroup>
+
+</Project>
