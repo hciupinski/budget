@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { resolveRedirectOrigin, shouldUseSecureCookie } from "@/lib/session-cookie";
 
 const SESSION_COOKIE = "budget_session";
 
 export function POST(request: Request) {
-  const response = NextResponse.redirect(new URL("/login", request.url), { status: 303 });
+  const redirectOrigin = resolveRedirectOrigin(request);
+  const response = NextResponse.redirect(new URL("/login", redirectOrigin), { status: 303 });
+  const isSecureRequest = shouldUseSecureCookie(request);
 
   response.cookies.set({
     name: SESSION_COOKIE,
@@ -11,7 +14,7 @@ export function POST(request: Request) {
     maxAge: 0,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest,
     path: "/"
   });
 

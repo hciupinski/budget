@@ -24,6 +24,7 @@ builder.Services.AddHttpLogging(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHealthChecks();
 builder.Services.AddAuthModule(builder.Configuration);
+builder.Services.AddBudgetModule(builder.Configuration);
 
 var allowedOrigins = builder.Configuration["AllowedOrigins"]?
     .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
@@ -70,6 +71,7 @@ app.MapGet("/api/ping", (ClaimsPrincipal user) => Results.Ok(new
 app.MapAuthModule();
 app.MapBudgetModule();
 
-app.Run();
+await app.Services.InitializeBudgetDatabaseAsync(CancellationToken.None);
+await app.RunAsync();
 
 public partial class Program;

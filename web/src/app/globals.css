@@ -28,3 +28,14 @@ body {
   background-image: radial-gradient(circle at top, rgba(59, 130, 246, 0.12), transparent 35%);
   min-height: 100vh;
 }
+
+input.numeric-input::-webkit-outer-spin-button,
+input.numeric-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input.numeric-input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
