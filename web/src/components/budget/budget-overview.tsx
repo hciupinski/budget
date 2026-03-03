@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { type AnnualPlanResponse } from "@/lib/budget-types";
+import { type AnnualPlanResponse, type AssetsOverviewResponse } from "@/lib/budget-types";
 import {
   ArrowRightIcon,
   BusinessIcon,
@@ -23,13 +23,6 @@ import {
   type AnnualCustomItem
 } from "@/lib/planner-custom-items";
 
-const ACCOUNT_SNAPSHOT = [
-  { label: "Business Account", value: 15420.5 },
-  { label: "Personal Checking", value: 3240 },
-  { label: "Emergency Fund", value: 12000 },
-  { label: "Investment Portfolio", value: 28500 }
-];
-
 export function BudgetOverview() {
   const now = new Date();
   useCurrencySetting();
@@ -37,6 +30,7 @@ export function BudgetOverview() {
   const month = now.getMonth() + 1;
   const sectionSettings = useSectionSettings();
   const [annualPlan, setAnnualPlan] = useState<AnnualPlanResponse | null>(null);
+  const [assetsOverview, setAssetsOverview] = useState<AssetsOverviewResponse | null>(null);
   const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
 
   const loadAnnualPlan = useCallback(async (selectedYear: number) => {
@@ -53,9 +47,24 @@ export function BudgetOverview() {
     setAnnualPlan((await response.json()) as AnnualPlanResponse);
   }, []);
 
+  const loadAssetsOverview = useCallback(async (selectedYear: number, selectedMonth: number) => {
+    const response = await fetch(`/api/budget/assets/overview?year=${selectedYear}&month=${selectedMonth}`, {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      setAssetsOverview(null);
+      return;
+    }
+
+    setAssetsOverview((await response.json()) as AssetsOverviewResponse);
+  }, []);
+
   useEffect(() => {
     void loadAnnualPlan(year);
-  }, [loadAnnualPlan, year]);
+    void loadAssetsOverview(year, month);
+  }, [loadAnnualPlan, loadAssetsOverview, month, year]);
 
   useEffect(() => {
     function syncCustomItems() {
@@ -220,10 +229,10 @@ export function BudgetOverview() {
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {ACCOUNT_SNAPSHOT.map((account) => (
-          <div key={account.label} className="ui-border ui-surface rounded-[20px] border p-4">
-            <p className="ui-text-muted text-sm md:text-base">{account.label}</p>
-            <p className="ui-text-strong mt-1 text-xl md:text-2xl font-medium">{asCurrency(account.value)}</p>
+        {(assetsOverview?.accounts ?? []).filter((account) => !account.isArchived).map((account) => (
+          <div key={account.id} className="ui-border ui-surface rounded-[20px] border p-4">
+            <p className="ui-text-muted text-sm md:text-base">{account.name}</p>
+            <p className="ui-text-strong mt-1 text-xl md:text-2xl font-medium">{asCurrency(account.currentBalance)}</p>
           </div>
         ))}
       </section>

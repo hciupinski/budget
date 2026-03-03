@@ -21,6 +21,8 @@ public static class BudgetModule
 
         services.AddScoped<BudgetDbInitializer>();
         services.AddScoped<BudgetService>();
+        services.AddHttpClient("fx-rates");
+        services.AddHttpClient("market-prices");
 
         return services;
     }
@@ -250,6 +252,200 @@ public static class BudgetModule
             try
             {
                 var result = await service.GetAuditAsync(year, month, limit ?? 50, ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapGet("/assets/overview", async (
+            int? year,
+            int? month,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                var targetYear = year ?? now.Year;
+                var targetMonth = month ?? now.Month;
+                var result = await service.GetAssetsOverviewAsync(targetYear, targetMonth, ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPost("/assets/accounts", async (
+            CreateBudgetAccountRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.CreateAccountAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPatch("/assets/accounts/{accountId:guid}", async (
+            Guid accountId,
+            UpdateBudgetAccountRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.UpdateAccountAsync(accountId, request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPost("/assets/transfers", async (
+            CreateAccountTransferRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.CreateTransferAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPut("/assets/snapshots/{year:int}/{month:int}", async (
+            int year,
+            int month,
+            UpsertMonthlyAccountSnapshotsRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.UpsertAccountSnapshotsAsync(year, month, request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPost("/assets/holdings", async (
+            CreateInvestmentHoldingRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.CreateHoldingAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPatch("/assets/holdings/{holdingId:guid}", async (
+            Guid holdingId,
+            UpdateInvestmentHoldingRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.UpdateHoldingAsync(holdingId, request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapDelete("/assets/holdings/{holdingId:guid}", async (
+            Guid holdingId,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await service.DeleteHoldingAsync(holdingId, CurrentUser(user), ct);
+                return Results.NoContent();
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPost("/assets/prices/refresh", async (
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.RefreshInvestmentPricesAsync(CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPost("/assets/savings-goals", async (
+            CreateSavingsGoalRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.CreateSavingsGoalAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPatch("/assets/savings-goals/{goalId:guid}", async (
+            Guid goalId,
+            UpdateSavingsGoalRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.UpdateSavingsGoalAsync(goalId, request, CurrentUser(user), ct);
                 return Results.Ok(result);
             }
             catch (Exception ex)

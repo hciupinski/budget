@@ -14,3 +14,11 @@ public enum MonthlyActionStatus
     Partial = 3,
     Skipped = 4
 }
+
+public enum BudgetAccountKind
+{
+    Bank = 1,
+    Savings = 2,
+    Brokerage = 3,
+    CashBucket = 4
+}

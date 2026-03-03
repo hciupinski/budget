@@ -172,3 +172,156 @@ public sealed record GeneralSettingsResponse(
 public sealed record UpdateGeneralSettingsRequest(
     string? Currency,
     string? Theme);
+
+public sealed record BudgetAccountResponse(
+    Guid Id,
+    string Name,
+    string Kind,
+    string Currency,
+    decimal CurrentBalance,
+    bool IsArchived,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateBudgetAccountRequest(
+    [property: Required] string Name,
+    [property: Required] string Kind,
+    [property: Required] string Currency,
+    decimal InitialBalance);
+
+public sealed record UpdateBudgetAccountRequest(
+    string? Name,
+    string? Kind,
+    string? Currency,
+    decimal? CurrentBalance,
+    bool? IsArchived);
+
+public sealed record AccountTransferResponse(
+    Guid Id,
+    Guid FromAccountId,
+    string FromAccountName,
+    Guid ToAccountId,
+    string ToAccountName,
+    decimal Amount,
+    string Note,
+    DateTimeOffset TransferDate);
+
+public sealed record CreateAccountTransferRequest(
+    Guid FromAccountId,
+    Guid ToAccountId,
+    [property: Range(typeof(decimal), "0.01", "999999999")] decimal Amount,
+    string? Note,
+    DateTimeOffset? TransferDate);
+
+public sealed record AccountSnapshotResponse(
+    Guid AccountId,
+    string AccountName,
+    string AccountKind,
+    int Year,
+    int Month,
+    decimal PlannedBalance,
+    decimal? ActualBalance,
+    DateTimeOffset UpdatedAt);
+
+public sealed record AccountSnapshotInput(
+    Guid AccountId,
+    decimal PlannedBalance,
+    decimal? ActualBalance);
+
+public sealed record UpsertMonthlyAccountSnapshotsRequest(
+    [property: Required] IReadOnlyList<AccountSnapshotInput> Snapshots);
+
+public sealed record InvestmentHoldingResponse(
+    Guid Id,
+    Guid AccountId,
+    string AccountName,
+    string AccountCurrency,
+    string Symbol,
+    decimal Units,
+    decimal AverageCost,
+    decimal? ManualPriceOverride,
+    decimal LastFetchedPrice,
+    decimal EffectivePrice,
+    decimal CurrentValue,
+    decimal CostBasis,
+    decimal ProfitLoss,
+    DateTimeOffset LastPriceUpdatedAt);
+
+public sealed record CreateInvestmentHoldingRequest(
+    Guid AccountId,
+    [property: Required] string Symbol,
+    decimal Units,
+    decimal AverageCost,
+    decimal? ManualPriceOverride);
+
+public sealed record UpdateInvestmentHoldingRequest(
+    decimal? Units,
+    decimal? AverageCost,
+    decimal? ManualPriceOverride,
+    bool ClearManualPriceOverride);
+
+public sealed record RefreshInvestmentPricesResponse(
+    int UpdatedCount,
+    DateTimeOffset RefreshedAt,
+    IReadOnlyList<string> Symbols);
+
+public sealed record InvestmentAllocationResponse(
+    Guid HoldingId,
+    string Symbol,
+    decimal CurrentValue,
+    decimal AllocationPercent);
+
+public sealed record InvestmentsDashboardResponse(
+    decimal TotalValue,
+    decimal TotalCostBasis,
+    decimal TotalProfitLoss,
+    IReadOnlyList<InvestmentAllocationResponse> Allocation);
+
+public sealed record SavingsGoalResponse(
+    Guid Id,
+    string Name,
+    Guid? AccountId,
+    string? AccountName,
+    decimal TargetAmount,
+    decimal CurrentAmount,
+    decimal MonthlyContributionTarget,
+    int? TargetYear,
+    int? TargetMonth,
+    decimal ProgressPercent,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateSavingsGoalRequest(
+    [property: Required] string Name,
+    Guid? AccountId,
+    decimal TargetAmount,
+    decimal CurrentAmount,
+    decimal MonthlyContributionTarget,
+    int? TargetYear,
+    int? TargetMonth);
+
+public sealed record UpdateSavingsGoalRequest(
+    string? Name,
+    Guid? AccountId,
+    decimal? TargetAmount,
+    decimal? CurrentAmount,
+    decimal? MonthlyContributionTarget,
+    int? TargetYear,
+    int? TargetMonth,
+    bool ClearTargetDate);
+
+public sealed record AssetsOverviewResponse(
+    int Year,
+    int Month,
+    AssetsOverviewSummaryResponse Summary,
+    IReadOnlyList<BudgetAccountResponse> Accounts,
+    IReadOnlyList<AccountTransferResponse> Transfers,
+    IReadOnlyList<AccountSnapshotResponse> Snapshots,
+    IReadOnlyList<InvestmentHoldingResponse> Holdings,
+    InvestmentsDashboardResponse Investments,
+    IReadOnlyList<SavingsGoalResponse> SavingsGoals);
+
+public sealed record AssetsOverviewSummaryResponse(
+    string BaseCurrency,
+    decimal NetWorth,
+    decimal SnapshotPlanned,
+    decimal SnapshotActual,
+    IReadOnlyDictionary<string, decimal> ExchangeRates);

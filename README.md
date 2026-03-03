@@ -1,10 +1,10 @@
-# Budget App (Epic 1 + Epic 2)
+# Budget App (Epic 1 + Epic 2 + Epic 4)
 
-Local-first budgeting app with secure owner login, annual planning matrix, and monthly execution workspace.
+Local-first budgeting app with secure owner login, annual planning matrix, monthly execution workspace, and account/investment tracking.
 
 ## Services
-- `web`: Next.js UI with login, annual planner, monthly workspace, and audit panel.
-- `api`: ASP.NET Core API (`net10.0`) with JWT auth and Epic 2 budgeting endpoints.
+- `web`: Next.js UI with login, annual planner, monthly workspace, accounts/investments dashboard, and audit panel.
+- `api`: ASP.NET Core API (`net10.0`) with JWT auth and budgeting + assets endpoints.
 - `worker`: background worker service with heartbeat endpoint.
 - `db`: PostgreSQL.
 - `adminer`: DB UI.
@@ -22,6 +22,7 @@ Local-first budgeting app with secure owner login, annual planning matrix, and m
 - Web app: `http://localhost:3000`
 - Annual Planner page: `http://localhost:3000/annual`
 - Monthly Workspace page: `http://localhost:3000/monthly`
+- Accounts page: `http://localhost:3000/accounts`
 - API health: `http://localhost:8080/healthz`
 - Worker health: `http://localhost:8082/healthz`
 - Adminer: `http://localhost:8081`
@@ -35,6 +36,14 @@ Use `OWNER_EMAIL` and `OWNER_PASSWORD` from `.env` to sign in.
 4. Execute the month by setting statuses: `PLANNED`, `DONE`, `PARTIAL`, `SKIPPED`.
 5. Update actual amounts and save action rows.
 6. Review summary cards and recent audit trail changes.
+
+## Epic 4 workflow
+1. Open **Accounts** and create bank/savings/brokerage/cash accounts.
+2. Log account transfers to keep balances synchronized.
+3. Save monthly account snapshots (planned vs actual).
+4. Add brokerage holdings and refresh market prices.
+5. Optionally set manual price overrides for holdings.
+6. Create savings goals and track progress.
 
 If routes/features do not appear after code changes, rebuild containers:
 - `docker compose up --build`

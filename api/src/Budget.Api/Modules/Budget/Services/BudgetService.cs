@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Globalization;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Budget.Api.Infrastructure.Persistence;
 using Budget.Api.Modules.Budget.Contracts;
@@ -8,7 +9,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Budget.Api.Modules.Budget.Services;
 
-public sealed class BudgetService(BudgetDbContext dbContext)
+public sealed class BudgetService(
+    BudgetDbContext dbContext,
+    IHttpClientFactory httpClientFactory,
+    ILogger<BudgetService> logger)
 {
     private const string SectionsStateKey = "managed_sections";
     private const string PlannerCustomizationStateKey = "planner_customization";
@@ -43,6 +47,14 @@ public sealed class BudgetService(BudgetDbContext dbContext)
     {
         "LIGHT",
         "DARK"
+    };
+
+    private static readonly HashSet<string> SupportedAccountKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "BANK",
+        "SAVINGS",
+        "BROKERAGE",
+        "CASH_BUCKET"
     };
 
     private static readonly IReadOnlyList<ManagedSectionStateItem> DefaultManagedSections =
@@ -787,6 +799,820 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         return entries;
     }
 
+    public async Task<AssetsOverviewResponse> GetAssetsOverviewAsync(int year, int month, CancellationToken cancellationToken)
+    {
+        ValidateYear(year);
+        ValidateMonth(month);
+
+        var generalSettings = await LoadUiStateAsync<GeneralSettingsState>(GeneralSettingsStateKey, cancellationToken);
+        var baseCurrency = NormalizeCurrencyCode(generalSettings?.Currency);
+
+        var accounts = await dbContext.Accounts
+            .AsNoTracking()
+            .OrderBy(x => x.IsArchived)
+            .ThenBy(x => x.Kind)
+            .ThenBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var snapshots = await dbContext.AccountSnapshots
+            .AsNoTracking()
+            .Include(x => x.Account)
+            .Where(x => x.Year == year && x.Month == month)
+            .OrderBy(x => x.Account.Name)
+            .ToListAsync(cancellationToken);
+
+        var transfers = await dbContext.AccountTransfers
+            .AsNoTracking()
+            .Include(x => x.FromAccount)
+            .Include(x => x.ToAccount)
+            .OrderByDescending(x => x.TransferDate)
+            .Take(50)
+            .ToListAsync(cancellationToken);
+
+        var holdings = await dbContext.InvestmentHoldings
+            .AsNoTracking()
+            .Include(x => x.Account)
+            .OrderBy(x => x.Symbol)
+            .ToListAsync(cancellationToken);
+
+        var savingsGoals = await dbContext.SavingsGoals
+            .AsNoTracking()
+            .Include(x => x.Account)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var accountResponses = accounts.Select(ToAccountResponse).ToArray();
+        var accountById = accounts.ToDictionary(x => x.Id);
+        var holdingResponses = holdings.Select(ToHoldingResponse).ToArray();
+        var investments = BuildInvestmentsDashboard(holdingResponses);
+        var rates = await ResolveExchangeRatesAsync(
+            baseCurrency,
+            accounts.Select(x => x.Currency).Distinct(StringComparer.OrdinalIgnoreCase),
+            cancellationToken);
+        var ratesWithBase = new Dictionary<string, decimal>(rates, StringComparer.OrdinalIgnoreCase)
+        {
+            [baseCurrency] = 1m
+        };
+
+        var netWorth = decimal.Round(accounts
+            .Where(x => !x.IsArchived)
+            .Sum(x => x.CurrentBalance * ratesWithBase[NormalizeCurrencyCode(x.Currency)]), 2, MidpointRounding.AwayFromZero);
+        var snapshotPlanned = decimal.Round(snapshots
+            .Sum(x => x.PlannedBalance * ratesWithBase[NormalizeCurrencyCode(x.Account.Currency)]), 2, MidpointRounding.AwayFromZero);
+        var snapshotActual = decimal.Round(snapshots
+            .Sum(x => (x.ActualBalance ?? x.PlannedBalance) * ratesWithBase[NormalizeCurrencyCode(x.Account.Currency)]), 2, MidpointRounding.AwayFromZero);
+        var summary = new AssetsOverviewSummaryResponse(
+            BaseCurrency: baseCurrency,
+            NetWorth: netWorth,
+            SnapshotPlanned: snapshotPlanned,
+            SnapshotActual: snapshotActual,
+            ExchangeRates: ratesWithBase);
+
+        return new AssetsOverviewResponse(
+            Year: year,
+            Month: month,
+            Summary: summary,
+            Accounts: accountResponses,
+            Transfers: transfers.Select(x => new AccountTransferResponse(
+                x.Id,
+                x.FromAccountId,
+                x.FromAccount.Name,
+                x.ToAccountId,
+                x.ToAccount.Name,
+                x.Amount,
+                x.Note,
+                x.TransferDate)).ToArray(),
+            Snapshots: snapshots.Select(x => new AccountSnapshotResponse(
+                x.AccountId,
+                x.Account.Name,
+                ToWireValue(x.Account.Kind),
+                x.Year,
+                x.Month,
+                x.PlannedBalance,
+                x.ActualBalance,
+                x.UpdatedAt)).ToArray(),
+            Holdings: holdingResponses,
+            Investments: investments,
+            SavingsGoals: savingsGoals.Select(x => ToSavingsGoalResponse(x, accountById)).ToArray());
+    }
+
+    public async Task<BudgetAccountResponse> CreateAccountAsync(
+        CreateBudgetAccountRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ValidationException("Account name is required.");
+        }
+
+        var kind = NormalizeAccountKind(request.Kind);
+        var currency = NormalizeCurrencyCode(request.Currency);
+        var now = DateTimeOffset.UtcNow;
+
+        var account = new BudgetAccount
+        {
+            Name = request.Name.Trim(),
+            Kind = kind,
+            Currency = currency,
+            CurrentBalance = decimal.Round(request.InitialBalance, 2, MidpointRounding.AwayFromZero),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.Accounts.Add(account);
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "BudgetAccount",
+            EntityId = account.Id,
+            EventType = "ACCOUNT_CREATED",
+            ChangedBy = actor,
+            ChangedAt = now,
+            Payload = JsonSerializer.Serialize(new
+            {
+                account.Name,
+                kind = ToWireValue(account.Kind),
+                account.Currency,
+                account.CurrentBalance
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToAccountResponse(account);
+    }
+
+    public async Task<BudgetAccountResponse> UpdateAccountAsync(
+        Guid accountId,
+        UpdateBudgetAccountRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var account = await dbContext.Accounts.SingleOrDefaultAsync(x => x.Id == accountId, cancellationToken);
+        if (account is null)
+        {
+            throw new KeyNotFoundException("Account was not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var changed = false;
+
+        if (!string.IsNullOrWhiteSpace(request.Name))
+        {
+            account.Name = request.Name.Trim();
+            changed = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Kind))
+        {
+            account.Kind = NormalizeAccountKind(request.Kind);
+            changed = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Currency))
+        {
+            account.Currency = NormalizeCurrencyCode(request.Currency);
+            changed = true;
+        }
+
+        if (request.CurrentBalance.HasValue)
+        {
+            account.CurrentBalance = decimal.Round(request.CurrentBalance.Value, 2, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (request.IsArchived.HasValue)
+        {
+            account.IsArchived = request.IsArchived.Value;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            account.UpdatedAt = now;
+            dbContext.AuditEntries.Add(new AuditEntry
+            {
+                EntityType = "BudgetAccount",
+                EntityId = account.Id,
+                EventType = "ACCOUNT_UPDATED",
+                ChangedBy = actor,
+                ChangedAt = now,
+                Payload = JsonSerializer.Serialize(new
+                {
+                    account.Name,
+                    kind = ToWireValue(account.Kind),
+                    account.Currency,
+                    account.CurrentBalance,
+                    account.IsArchived
+                })
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return ToAccountResponse(account);
+    }
+
+    public async Task<AccountTransferResponse> CreateTransferAsync(
+        CreateAccountTransferRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (request.FromAccountId == request.ToAccountId)
+        {
+            throw new ValidationException("Transfer must use two different accounts.");
+        }
+
+        if (request.Amount <= 0)
+        {
+            throw new ValidationException("Transfer amount must be greater than 0.");
+        }
+
+        var accountIds = new[] { request.FromAccountId, request.ToAccountId };
+        var accounts = await dbContext.Accounts
+            .Where(x => accountIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        if (!accounts.TryGetValue(request.FromAccountId, out var fromAccount) ||
+            !accounts.TryGetValue(request.ToAccountId, out var toAccount))
+        {
+            throw new KeyNotFoundException("Transfer account was not found.");
+        }
+
+        if (fromAccount.IsArchived || toAccount.IsArchived)
+        {
+            throw new ValidationException("Cannot transfer from or to archived account.");
+        }
+
+        if (!string.Equals(fromAccount.Currency, toAccount.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ValidationException("Transfers between different currencies are not supported.");
+        }
+
+        var amount = decimal.Round(request.Amount, 2, MidpointRounding.AwayFromZero);
+        fromAccount.CurrentBalance = decimal.Round(fromAccount.CurrentBalance - amount, 2, MidpointRounding.AwayFromZero);
+        toAccount.CurrentBalance = decimal.Round(toAccount.CurrentBalance + amount, 2, MidpointRounding.AwayFromZero);
+
+        var now = DateTimeOffset.UtcNow;
+        fromAccount.UpdatedAt = now;
+        toAccount.UpdatedAt = now;
+
+        var transfer = new AccountTransfer
+        {
+            FromAccountId = fromAccount.Id,
+            ToAccountId = toAccount.Id,
+            Amount = amount,
+            Note = request.Note?.Trim() ?? string.Empty,
+            TransferDate = request.TransferDate ?? now,
+            CreatedAt = now
+        };
+
+        dbContext.AccountTransfers.Add(transfer);
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "AccountTransfer",
+            EntityId = transfer.Id,
+            EventType = "TRANSFER_CREATED",
+            ChangedBy = actor,
+            ChangedAt = now,
+            Payload = JsonSerializer.Serialize(new
+            {
+                transfer.FromAccountId,
+                transfer.ToAccountId,
+                transfer.Amount,
+                transfer.TransferDate,
+                transfer.Note
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AccountTransferResponse(
+            transfer.Id,
+            transfer.FromAccountId,
+            fromAccount.Name,
+            transfer.ToAccountId,
+            toAccount.Name,
+            transfer.Amount,
+            transfer.Note,
+            transfer.TransferDate);
+    }
+
+    public async Task<IReadOnlyList<AccountSnapshotResponse>> UpsertAccountSnapshotsAsync(
+        int year,
+        int month,
+        UpsertMonthlyAccountSnapshotsRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        ValidateYear(year);
+        ValidateMonth(month);
+
+        if (request.Snapshots.Count == 0)
+        {
+            return [];
+        }
+
+        var accountIds = request.Snapshots.Select(x => x.AccountId).Distinct().ToArray();
+        var accounts = await dbContext.Accounts
+            .Where(x => accountIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var missing = accountIds.Where(x => !accounts.ContainsKey(x)).ToArray();
+        if (missing.Length > 0)
+        {
+            throw new ValidationException($"Unknown account id(s): {string.Join(",", missing)}");
+        }
+
+        var existing = await dbContext.AccountSnapshots
+            .Where(x => x.Year == year && x.Month == month && accountIds.Contains(x.AccountId))
+            .ToDictionaryAsync(x => x.AccountId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var changed = 0;
+
+        foreach (var input in request.Snapshots)
+        {
+            var planned = decimal.Round(input.PlannedBalance, 2, MidpointRounding.AwayFromZero);
+            var actual = input.ActualBalance.HasValue
+                ? (decimal?)decimal.Round(input.ActualBalance.Value, 2, MidpointRounding.AwayFromZero)
+                : null;
+
+            if (existing.TryGetValue(input.AccountId, out var snapshot))
+            {
+                if (snapshot.PlannedBalance == planned && snapshot.ActualBalance == actual)
+                {
+                    continue;
+                }
+
+                snapshot.PlannedBalance = planned;
+                snapshot.ActualBalance = actual;
+                snapshot.UpdatedAt = now;
+                changed++;
+                continue;
+            }
+
+            dbContext.AccountSnapshots.Add(new AccountSnapshot
+            {
+                AccountId = input.AccountId,
+                Year = year,
+                Month = month,
+                PlannedBalance = planned,
+                ActualBalance = actual,
+                UpdatedAt = now
+            });
+            changed++;
+        }
+
+        if (changed > 0)
+        {
+            dbContext.AuditEntries.Add(new AuditEntry
+            {
+                EntityType = "AccountSnapshot",
+                EntityId = Guid.NewGuid(),
+                EventType = "MONTHLY_SNAPSHOTS_UPSERTED",
+                ChangedBy = actor,
+                ChangedAt = now,
+                Payload = JsonSerializer.Serialize(new
+                {
+                    year,
+                    month,
+                    changed
+                })
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var result = await dbContext.AccountSnapshots
+            .AsNoTracking()
+            .Include(x => x.Account)
+            .Where(x => x.Year == year && x.Month == month)
+            .OrderBy(x => x.Account.Name)
+            .Select(x => new AccountSnapshotResponse(
+                x.AccountId,
+                x.Account.Name,
+                ToWireValue(x.Account.Kind),
+                x.Year,
+                x.Month,
+                x.PlannedBalance,
+                x.ActualBalance,
+                x.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        return result;
+    }
+
+    public async Task<InvestmentHoldingResponse> CreateHoldingAsync(
+        CreateInvestmentHoldingRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var account = await dbContext.Accounts.SingleOrDefaultAsync(x => x.Id == request.AccountId, cancellationToken);
+        if (account is null)
+        {
+            throw new KeyNotFoundException("Account was not found.");
+        }
+
+        if (account.Kind != BudgetAccountKind.Brokerage)
+        {
+            throw new ValidationException("Holdings can be added only to BROKERAGE accounts.");
+        }
+
+        var symbol = NormalizeSymbol(request.Symbol);
+        if (request.Units <= 0)
+        {
+            throw new ValidationException("Units must be greater than 0.");
+        }
+
+        if (request.AverageCost < 0)
+        {
+            throw new ValidationException("Average cost cannot be negative.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var fetchedPrice = await FetchMarketPriceFromProviderAsync(symbol, cancellationToken);
+        var effectiveFetched = fetchedPrice ?? decimal.Round(request.AverageCost, 4, MidpointRounding.AwayFromZero);
+        var holding = new InvestmentHolding
+        {
+            AccountId = account.Id,
+            Symbol = symbol,
+            Units = decimal.Round(request.Units, 6, MidpointRounding.AwayFromZero),
+            AverageCost = decimal.Round(request.AverageCost, 4, MidpointRounding.AwayFromZero),
+            ManualPriceOverride = request.ManualPriceOverride.HasValue
+                ? decimal.Round(request.ManualPriceOverride.Value, 4, MidpointRounding.AwayFromZero)
+                : null,
+            LastFetchedPrice = effectiveFetched,
+            LastPriceUpdatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.InvestmentHoldings.Add(holding);
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "InvestmentHolding",
+            EntityId = holding.Id,
+            EventType = "HOLDING_CREATED",
+            ChangedBy = actor,
+            ChangedAt = now,
+            Payload = JsonSerializer.Serialize(new
+            {
+                holding.AccountId,
+                holding.Symbol,
+                holding.Units,
+                holding.AverageCost,
+                holding.ManualPriceOverride
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        holding.Account = account;
+
+        return ToHoldingResponse(holding);
+    }
+
+    public async Task<InvestmentHoldingResponse> UpdateHoldingAsync(
+        Guid holdingId,
+        UpdateInvestmentHoldingRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var holding = await dbContext.InvestmentHoldings
+            .Include(x => x.Account)
+            .SingleOrDefaultAsync(x => x.Id == holdingId, cancellationToken);
+
+        if (holding is null)
+        {
+            throw new KeyNotFoundException("Holding was not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var changed = false;
+
+        if (request.Units.HasValue)
+        {
+            if (request.Units.Value <= 0)
+            {
+                throw new ValidationException("Units must be greater than 0.");
+            }
+
+            holding.Units = decimal.Round(request.Units.Value, 6, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (request.AverageCost.HasValue)
+        {
+            if (request.AverageCost.Value < 0)
+            {
+                throw new ValidationException("Average cost cannot be negative.");
+            }
+
+            holding.AverageCost = decimal.Round(request.AverageCost.Value, 4, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (request.ClearManualPriceOverride)
+        {
+            holding.ManualPriceOverride = null;
+            changed = true;
+        }
+        else if (request.ManualPriceOverride.HasValue)
+        {
+            holding.ManualPriceOverride = decimal.Round(request.ManualPriceOverride.Value, 4, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            holding.UpdatedAt = now;
+            dbContext.AuditEntries.Add(new AuditEntry
+            {
+                EntityType = "InvestmentHolding",
+                EntityId = holding.Id,
+                EventType = "HOLDING_UPDATED",
+                ChangedBy = actor,
+                ChangedAt = now,
+                Payload = JsonSerializer.Serialize(new
+                {
+                    holding.Symbol,
+                    holding.Units,
+                    holding.AverageCost,
+                    holding.ManualPriceOverride
+                })
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return ToHoldingResponse(holding);
+    }
+
+    public async Task DeleteHoldingAsync(
+        Guid holdingId,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var holding = await dbContext.InvestmentHoldings
+            .SingleOrDefaultAsync(x => x.Id == holdingId, cancellationToken);
+
+        if (holding is null)
+        {
+            throw new KeyNotFoundException("Holding was not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        dbContext.InvestmentHoldings.Remove(holding);
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "InvestmentHolding",
+            EntityId = holding.Id,
+            EventType = "HOLDING_DELETED",
+            ChangedBy = actor,
+            ChangedAt = now,
+            Payload = JsonSerializer.Serialize(new
+            {
+                holding.Symbol,
+                holding.AccountId
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<RefreshInvestmentPricesResponse> RefreshInvestmentPricesAsync(
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var holdings = await dbContext.InvestmentHoldings.ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var updated = 0;
+        var symbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pricesBySymbol = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var holding in holdings)
+        {
+            symbols.Add(holding.Symbol);
+            if (!pricesBySymbol.ContainsKey(holding.Symbol))
+            {
+                pricesBySymbol[holding.Symbol] = await FetchMarketPriceFromProviderAsync(holding.Symbol, cancellationToken);
+            }
+
+            var fetchedPrice = pricesBySymbol[holding.Symbol];
+            if (!fetchedPrice.HasValue)
+            {
+                continue;
+            }
+
+            var nextPrice = fetchedPrice.Value;
+
+            if (holding.LastFetchedPrice == nextPrice)
+            {
+                continue;
+            }
+
+            holding.LastFetchedPrice = nextPrice;
+            holding.LastPriceUpdatedAt = now;
+            holding.UpdatedAt = now;
+            updated++;
+        }
+
+        if (updated > 0)
+        {
+            dbContext.AuditEntries.Add(new AuditEntry
+            {
+                EntityType = "InvestmentHolding",
+                EntityId = Guid.NewGuid(),
+                EventType = "PRICES_REFRESHED",
+                ChangedBy = actor,
+                ChangedAt = now,
+                Payload = JsonSerializer.Serialize(new
+                {
+                    updated
+                })
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return new RefreshInvestmentPricesResponse(
+            UpdatedCount: updated,
+            RefreshedAt: now,
+            Symbols: symbols.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    public async Task<SavingsGoalResponse> CreateSavingsGoalAsync(
+        CreateSavingsGoalRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            throw new ValidationException("Savings goal name is required.");
+        }
+
+        if (request.TargetAmount <= 0)
+        {
+            throw new ValidationException("Target amount must be greater than 0.");
+        }
+
+        ValidateSavingsGoalDate(request.TargetYear, request.TargetMonth);
+
+        BudgetAccount? linkedAccount = null;
+        if (request.AccountId.HasValue)
+        {
+            linkedAccount = await dbContext.Accounts.SingleOrDefaultAsync(x => x.Id == request.AccountId.Value, cancellationToken);
+            if (linkedAccount is null)
+            {
+                throw new KeyNotFoundException("Linked account was not found.");
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var goal = new SavingsGoal
+        {
+            Name = request.Name.Trim(),
+            AccountId = request.AccountId,
+            TargetAmount = decimal.Round(request.TargetAmount, 2, MidpointRounding.AwayFromZero),
+            CurrentAmount = decimal.Round(request.CurrentAmount, 2, MidpointRounding.AwayFromZero),
+            MonthlyContributionTarget = decimal.Round(request.MonthlyContributionTarget, 2, MidpointRounding.AwayFromZero),
+            TargetYear = request.TargetYear,
+            TargetMonth = request.TargetMonth,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.SavingsGoals.Add(goal);
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "SavingsGoal",
+            EntityId = goal.Id,
+            EventType = "GOAL_CREATED",
+            ChangedBy = actor,
+            ChangedAt = now,
+            Payload = JsonSerializer.Serialize(new
+            {
+                goal.Name,
+                goal.TargetAmount,
+                goal.MonthlyContributionTarget
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        goal.Account = linkedAccount;
+
+        return ToSavingsGoalResponse(
+            goal,
+            linkedAccount is null ? new Dictionary<Guid, BudgetAccount>() : new Dictionary<Guid, BudgetAccount> { [linkedAccount.Id] = linkedAccount });
+    }
+
+    public async Task<SavingsGoalResponse> UpdateSavingsGoalAsync(
+        Guid goalId,
+        UpdateSavingsGoalRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var goal = await dbContext.SavingsGoals
+            .Include(x => x.Account)
+            .SingleOrDefaultAsync(x => x.Id == goalId, cancellationToken);
+
+        if (goal is null)
+        {
+            throw new KeyNotFoundException("Savings goal was not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var changed = false;
+
+        if (!string.IsNullOrWhiteSpace(request.Name))
+        {
+            goal.Name = request.Name.Trim();
+            changed = true;
+        }
+
+        if (request.AccountId.HasValue)
+        {
+            var account = await dbContext.Accounts.SingleOrDefaultAsync(x => x.Id == request.AccountId.Value, cancellationToken);
+            if (account is null)
+            {
+                throw new KeyNotFoundException("Linked account was not found.");
+            }
+
+            goal.AccountId = account.Id;
+            goal.Account = account;
+            changed = true;
+        }
+
+        if (request.TargetAmount.HasValue)
+        {
+            if (request.TargetAmount <= 0)
+            {
+                throw new ValidationException("Target amount must be greater than 0.");
+            }
+
+            goal.TargetAmount = decimal.Round(request.TargetAmount.Value, 2, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (request.CurrentAmount.HasValue)
+        {
+            goal.CurrentAmount = decimal.Round(request.CurrentAmount.Value, 2, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (request.MonthlyContributionTarget.HasValue)
+        {
+            goal.MonthlyContributionTarget = decimal.Round(request.MonthlyContributionTarget.Value, 2, MidpointRounding.AwayFromZero);
+            changed = true;
+        }
+
+        if (request.ClearTargetDate)
+        {
+            goal.TargetYear = null;
+            goal.TargetMonth = null;
+            changed = true;
+        }
+        else if (request.TargetYear.HasValue || request.TargetMonth.HasValue)
+        {
+            var targetYear = request.TargetYear ?? goal.TargetYear;
+            var targetMonth = request.TargetMonth ?? goal.TargetMonth;
+            ValidateSavingsGoalDate(targetYear, targetMonth);
+            goal.TargetYear = targetYear;
+            goal.TargetMonth = targetMonth;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            goal.UpdatedAt = now;
+            dbContext.AuditEntries.Add(new AuditEntry
+            {
+                EntityType = "SavingsGoal",
+                EntityId = goal.Id,
+                EventType = "GOAL_UPDATED",
+                ChangedBy = actor,
+                ChangedAt = now,
+                Payload = JsonSerializer.Serialize(new
+                {
+                    goal.Name,
+                    goal.TargetAmount,
+                    goal.CurrentAmount,
+                    goal.MonthlyContributionTarget,
+                    goal.TargetYear,
+                    goal.TargetMonth
+                })
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        Dictionary<Guid, BudgetAccount> accountMap = [];
+        if (goal.Account is not null)
+        {
+            accountMap[goal.Account.Id] = goal.Account;
+        }
+
+        return ToSavingsGoalResponse(goal, accountMap);
+    }
+
     private async Task<T?> LoadUiStateAsync<T>(string stateKey, CancellationToken cancellationToken)
     {
         var entry = await dbContext.UiStateEntries
@@ -1034,6 +1860,167 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         };
     }
 
+    private static BudgetAccountResponse ToAccountResponse(BudgetAccount account)
+    {
+        return new BudgetAccountResponse(
+            account.Id,
+            account.Name,
+            ToWireValue(account.Kind),
+            NormalizeCurrencyCode(account.Currency),
+            account.CurrentBalance,
+            account.IsArchived,
+            account.UpdatedAt);
+    }
+
+    private static InvestmentHoldingResponse ToHoldingResponse(InvestmentHolding holding)
+    {
+        var effectivePrice = holding.ManualPriceOverride ?? holding.LastFetchedPrice;
+        var currentValue = decimal.Round(holding.Units * effectivePrice, 2, MidpointRounding.AwayFromZero);
+        var costBasis = decimal.Round(holding.Units * holding.AverageCost, 2, MidpointRounding.AwayFromZero);
+        var profitLoss = decimal.Round(currentValue - costBasis, 2, MidpointRounding.AwayFromZero);
+
+        return new InvestmentHoldingResponse(
+            holding.Id,
+            holding.AccountId,
+            holding.Account.Name,
+            NormalizeCurrencyCode(holding.Account.Currency),
+            holding.Symbol,
+            holding.Units,
+            holding.AverageCost,
+            holding.ManualPriceOverride,
+            holding.LastFetchedPrice,
+            effectivePrice,
+            currentValue,
+            costBasis,
+            profitLoss,
+            holding.LastPriceUpdatedAt);
+    }
+
+    private static InvestmentsDashboardResponse BuildInvestmentsDashboard(
+        IReadOnlyList<InvestmentHoldingResponse> holdings)
+    {
+        var totalValue = holdings.Sum(x => x.CurrentValue);
+        var totalCostBasis = holdings.Sum(x => x.CostBasis);
+        var totalProfitLoss = holdings.Sum(x => x.ProfitLoss);
+
+        var allocation = holdings
+            .Where(x => x.CurrentValue > 0m)
+            .OrderByDescending(x => x.CurrentValue)
+            .Select(x => new InvestmentAllocationResponse(
+                x.Id,
+                x.Symbol,
+                x.CurrentValue,
+                totalValue <= 0m
+                    ? 0m
+                    : decimal.Round((x.CurrentValue / totalValue) * 100m, 2, MidpointRounding.AwayFromZero)))
+            .ToArray();
+
+        return new InvestmentsDashboardResponse(
+            TotalValue: totalValue,
+            TotalCostBasis: totalCostBasis,
+            TotalProfitLoss: totalProfitLoss,
+            Allocation: allocation);
+    }
+
+    private async Task<Dictionary<string, decimal>> ResolveExchangeRatesAsync(
+        string baseCurrency,
+        IEnumerable<string> currencies,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBase = NormalizeCurrencyCode(baseCurrency);
+        var distinct = currencies
+            .Select(NormalizeCurrencyCode)
+            .Where(x => !string.Equals(x, normalizedBase, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        if (distinct.Length == 0)
+        {
+            return result;
+        }
+
+        foreach (var currency in distinct)
+        {
+            var rate = await FetchExchangeRateAsync(currency, normalizedBase, cancellationToken);
+            result[currency] = rate;
+        }
+
+        return result;
+    }
+
+    private async Task<decimal> FetchExchangeRateAsync(string fromCurrency, string toCurrency, CancellationToken cancellationToken)
+    {
+        if (string.Equals(fromCurrency, toCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1m;
+        }
+
+        try
+        {
+            var client = httpClientFactory.CreateClient("fx-rates");
+            client.Timeout = TimeSpan.FromSeconds(5);
+            var url = $"https://api.frankfurter.app/latest?from={fromCurrency}&to={toCurrency}";
+            var payload = await client.GetFromJsonAsync<FrankfurterResponse>(url, cancellationToken);
+            if (payload?.Rates is null)
+            {
+                return 1m;
+            }
+
+            if (!payload.Rates.TryGetValue(toCurrency, out var rate))
+            {
+                return 1m;
+            }
+
+            if (rate <= 0m)
+            {
+                return 1m;
+            }
+
+            return decimal.Round(rate, 6, MidpointRounding.AwayFromZero);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Unable to fetch FX rate {From}->{To}. Falling back to 1.", fromCurrency, toCurrency);
+            return 1m;
+        }
+    }
+
+    private static SavingsGoalResponse ToSavingsGoalResponse(
+        SavingsGoal goal,
+        IReadOnlyDictionary<Guid, BudgetAccount> accountsById)
+    {
+        decimal currentAmount;
+        string? accountName = null;
+
+        if (goal.AccountId.HasValue && accountsById.TryGetValue(goal.AccountId.Value, out var account))
+        {
+            currentAmount = account.CurrentBalance;
+            accountName = account.Name;
+        }
+        else
+        {
+            currentAmount = goal.CurrentAmount;
+        }
+
+        var progressPercent = goal.TargetAmount <= 0m
+            ? 0m
+            : decimal.Round((currentAmount / goal.TargetAmount) * 100m, 2, MidpointRounding.AwayFromZero);
+
+        return new SavingsGoalResponse(
+            goal.Id,
+            goal.Name,
+            goal.AccountId,
+            accountName,
+            goal.TargetAmount,
+            currentAmount,
+            goal.MonthlyContributionTarget,
+            goal.TargetYear,
+            goal.TargetMonth,
+            progressPercent,
+            goal.UpdatedAt);
+    }
+
     private static string NormalizeSectionKind(string? kind)
     {
         if (string.IsNullOrWhiteSpace(kind))
@@ -1043,6 +2030,29 @@ public sealed class BudgetService(BudgetDbContext dbContext)
 
         var normalized = kind.Trim().ToUpperInvariant();
         return ManagedSectionKinds.Contains(normalized) ? normalized : "PERSONAL_EXPENSES";
+    }
+
+    private static BudgetAccountKind NormalizeAccountKind(string? kind)
+    {
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            throw new ValidationException("Account kind is required.");
+        }
+
+        var normalized = kind.Trim().ToUpperInvariant();
+        if (!SupportedAccountKinds.Contains(normalized))
+        {
+            throw new ValidationException($"Unsupported account kind '{kind}'.");
+        }
+
+        return normalized switch
+        {
+            "BANK" => BudgetAccountKind.Bank,
+            "SAVINGS" => BudgetAccountKind.Savings,
+            "BROKERAGE" => BudgetAccountKind.Brokerage,
+            "CASH_BUCKET" => BudgetAccountKind.CashBucket,
+            _ => throw new ValidationException($"Unsupported account kind '{kind}'.")
+        };
     }
 
     private static string NormalizeMonthlyStatus(string? status)
@@ -1076,6 +2086,119 @@ public sealed class BudgetService(BudgetDbContext dbContext)
 
         var normalized = theme.Trim().ToUpperInvariant();
         return SupportedThemes.Contains(normalized) ? normalized : "LIGHT";
+    }
+
+    private static string NormalizeSymbol(string symbol)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            throw new ValidationException("Symbol is required.");
+        }
+
+        var normalized = symbol.Trim().ToUpperInvariant();
+        if (normalized.Length > 20)
+        {
+            throw new ValidationException("Symbol is too long.");
+        }
+
+        return normalized;
+    }
+
+    private async Task<decimal?> FetchMarketPriceFromProviderAsync(string symbol, CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeSymbol(symbol);
+
+        try
+        {
+            var client = httpClientFactory.CreateClient("market-prices");
+            client.Timeout = TimeSpan.FromSeconds(5);
+            var endpoint = $"https://stooq.com/q/l/?s={normalized.ToLowerInvariant()}&i=d";
+            var csv = await client.GetStringAsync(endpoint, cancellationToken);
+            return ParseStooqClosePrice(csv);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Unable to fetch market price for symbol {Symbol}.", normalized);
+            return null;
+        }
+    }
+
+    private static decimal? ParseStooqClosePrice(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv))
+        {
+            return null;
+        }
+
+        var lines = csv
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToArray();
+
+        if (lines.Length < 2)
+        {
+            var singleRow = lines[0].Split(',', StringSplitOptions.TrimEntries);
+            if (singleRow.Length < 7)
+            {
+                return null;
+            }
+
+            var closeRaw = singleRow[6];
+            if (string.Equals(closeRaw, "N/D", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (!decimal.TryParse(closeRaw, NumberStyles.Number, CultureInfo.InvariantCulture, out var directClose))
+            {
+                return null;
+            }
+
+            return directClose > 0m ? decimal.Round(directClose, 4, MidpointRounding.AwayFromZero) : null;
+        }
+
+        var headers = lines[0].Split(',', StringSplitOptions.TrimEntries);
+        var values = lines[1].Split(',', StringSplitOptions.TrimEntries);
+        var closeIndex = Array.FindIndex(headers, header => string.Equals(header, "Close", StringComparison.OrdinalIgnoreCase));
+
+        if (closeIndex < 0 || closeIndex >= values.Length)
+        {
+            return null;
+        }
+
+        var raw = values[closeIndex];
+        if (string.Equals(raw, "N/D", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var close))
+        {
+            return null;
+        }
+
+        return close > 0m ? decimal.Round(close, 4, MidpointRounding.AwayFromZero) : null;
+    }
+
+    private static void ValidateSavingsGoalDate(int? targetYear, int? targetMonth)
+    {
+        if (!targetYear.HasValue && !targetMonth.HasValue)
+        {
+            return;
+        }
+
+        if (!targetYear.HasValue || !targetMonth.HasValue)
+        {
+            throw new ValidationException("Savings goal target date requires both year and month.");
+        }
+
+        ValidateYear(targetYear.Value);
+        ValidateMonth(targetMonth.Value);
+    }
+
+    private sealed class FrankfurterResponse
+    {
+        public Dictionary<string, decimal> Rates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private static void ValidateYear(int year)
@@ -1176,6 +2299,18 @@ public sealed class BudgetService(BudgetDbContext dbContext)
             MonthlyActionStatus.Partial => "PARTIAL",
             MonthlyActionStatus.Skipped => "SKIPPED",
             _ => status.ToString().ToUpper(CultureInfo.InvariantCulture)
+        };
+    }
+
+    public static string ToWireValue(BudgetAccountKind kind)
+    {
+        return kind switch
+        {
+            BudgetAccountKind.Bank => "BANK",
+            BudgetAccountKind.Savings => "SAVINGS",
+            BudgetAccountKind.Brokerage => "BROKERAGE",
+            BudgetAccountKind.CashBucket => "CASH_BUCKET",
+            _ => kind.ToString().ToUpper(CultureInfo.InvariantCulture)
         };
     }
 

@@ -9,6 +9,7 @@ public sealed class BudgetDbInitializer(BudgetDbContext dbContext, ILogger<Budge
     {
         await dbContext.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureUiStateSchemaAsync(cancellationToken);
+        await EnsureEpic4SchemaAsync(cancellationToken);
 
         if (await dbContext.Categories.AnyAsync(cancellationToken))
         {
@@ -60,6 +61,90 @@ public sealed class BudgetDbInitializer(BudgetDbContext dbContext, ILogger<Budge
                     ALTER TABLE budget_ui_state RENAME COLUMN "Value" TO value;
                 END IF;
             END $$;
+            """,
+            cancellationToken);
+    }
+
+    private async Task EnsureEpic4SchemaAsync(CancellationToken cancellationToken)
+    {
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS budget_accounts (
+                id uuid PRIMARY KEY,
+                name character varying(140) NOT NULL,
+                kind character varying(40) NOT NULL,
+                currency character varying(10) NOT NULL,
+                current_balance numeric(18,2) NOT NULL,
+                is_archived boolean NOT NULL DEFAULT false,
+                created_at timestamp with time zone NOT NULL,
+                updated_at timestamp with time zone NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_budget_accounts_name ON budget_accounts (name);
+            """,
+            cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS account_transfers (
+                id uuid PRIMARY KEY,
+                from_account_id uuid NOT NULL REFERENCES budget_accounts(id) ON DELETE RESTRICT,
+                to_account_id uuid NOT NULL REFERENCES budget_accounts(id) ON DELETE RESTRICT,
+                amount numeric(18,2) NOT NULL,
+                note character varying(280) NOT NULL,
+                transfer_date timestamp with time zone NOT NULL,
+                created_at timestamp with time zone NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_account_transfers_transfer_date ON account_transfers (transfer_date);
+            """,
+            cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS account_snapshots (
+                id uuid PRIMARY KEY,
+                account_id uuid NOT NULL REFERENCES budget_accounts(id) ON DELETE CASCADE,
+                year integer NOT NULL,
+                month integer NOT NULL,
+                planned_balance numeric(18,2) NOT NULL,
+                actual_balance numeric(18,2) NULL,
+                updated_at timestamp with time zone NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_account_snapshots_unique ON account_snapshots (account_id, year, month);
+            """,
+            cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS investment_holdings (
+                id uuid PRIMARY KEY,
+                account_id uuid NOT NULL REFERENCES budget_accounts(id) ON DELETE CASCADE,
+                symbol character varying(20) NOT NULL,
+                units numeric(18,6) NOT NULL,
+                average_cost numeric(18,4) NOT NULL,
+                manual_price_override numeric(18,4) NULL,
+                last_fetched_price numeric(18,4) NOT NULL,
+                last_price_updated_at timestamp with time zone NOT NULL,
+                updated_at timestamp with time zone NOT NULL
+            );
+            DROP INDEX IF EXISTS ix_investment_holdings_unique;
+            CREATE INDEX IF NOT EXISTS ix_investment_holdings_account_symbol ON investment_holdings (account_id, symbol);
+            """,
+            cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS savings_goals (
+                id uuid PRIMARY KEY,
+                name character varying(160) NOT NULL,
+                account_id uuid NULL REFERENCES budget_accounts(id) ON DELETE SET NULL,
+                target_amount numeric(18,2) NOT NULL,
+                current_amount numeric(18,2) NOT NULL,
+                monthly_contribution_target numeric(18,2) NOT NULL,
+                target_year integer NULL,
+                target_month integer NULL,
+                created_at timestamp with time zone NOT NULL,
+                updated_at timestamp with time zone NOT NULL
+            );
             """,
             cancellationToken);
     }
