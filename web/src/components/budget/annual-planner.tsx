@@ -479,13 +479,13 @@ export function AnnualPlanner() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-3xl">Annual Budget Planning</h1>
-          <p className="text-base text-[#71768b]">Plan your budget across all months</p>
+          <h1 className="ui-text-strong text-2xl font-semibold tracking-[-0.02em] md:text-3xl">Annual Budget Planning</h1>
+          <p className="ui-text-muted text-base">Plan your budget across all months</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <select
-            className="h-12 min-w-[132px] rounded-2xl border border-[#d1d5dd] bg-[#e9eaed] px-4 text-sm text-[#202532]"
+            className="ui-control ui-border h-12 min-w-[132px] rounded-2xl border px-4 text-sm"
             value={year}
             onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
           >
@@ -501,7 +501,7 @@ export function AnnualPlanner() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
+            className="ui-btn-secondary ui-border ui-hover-soft inline-flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm md:text-base"
             onClick={() => void loadAnnualPlan(year)}
           >
             <RefreshIcon size={20} />
@@ -510,7 +510,7 @@ export function AnnualPlanner() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
+            className="ui-btn-secondary ui-border ui-hover-soft inline-flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm md:text-base"
             onClick={() => void copyFromPreviousYear()}
             disabled={saving}
           >
@@ -520,7 +520,7 @@ export function AnnualPlanner() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm text-white hover:opacity-95 disabled:opacity-60 md:text-base"
+            className="ui-btn-primary inline-flex h-12 items-center gap-2 rounded-2xl px-5 text-sm disabled:opacity-60 md:text-base"
             onClick={() => void saveAnnualPlan()}
             disabled={saving || loading || !annualPlan}
           >
@@ -530,12 +530,12 @@ export function AnnualPlanner() {
         </div>
       </header>
 
-      {message ? <p className="text-sm text-[#686e84] md:text-base">{message}</p> : null}
-      {loading ? <p className="text-sm text-[#686e84] md:text-base">Loading annual plan...</p> : null}
+      {message ? <p className="ui-text-muted text-sm md:text-base">{message}</p> : null}
+      {loading ? <p className="ui-text-muted text-sm md:text-base">Loading annual plan...</p> : null}
 
       {annualPlan ? (
         <>
-          <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
+          <section className="ui-border ui-surface overflow-hidden rounded-[22px] border">
             <div className="max-w-full overflow-x-auto">
               <table className="w-max min-w-full border-collapse">
                 <thead>
@@ -696,8 +696,8 @@ export function AnnualPlanner() {
             <MetricCard label="REMAINDER" value={summary.remainder} valueTone="text-[#e11d48]" danger />
           </section>
 
-          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
-            <h2 className="text-xl font-medium text-[#171a24] md:text-2xl">Annual Money Flow Summary</h2>
+          <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
+            <h2 className="ui-text-strong text-xl font-medium md:text-2xl">Annual Money Flow Summary</h2>
 
             <div className="mt-6 space-y-4 text-sm md:text-base">
               <SummaryLine label="Total Business Income" value={summary.income} valueTone="text-[#10a34a]" />
@@ -736,8 +736,8 @@ function MetricCard({
   danger?: boolean;
 }) {
   return (
-    <div className={`rounded-[20px] border bg-[#f6f7f9] p-4 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
-      <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
+    <div className={`ui-surface rounded-[20px] border p-4 ${danger ? "border-[#f43f5e]" : "ui-border"}`}>
+      <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
       <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(value)}</p>
     </div>
   );
@@ -754,7 +754,7 @@ function SummaryLine({
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <p className="text-[#6f7489]">{label}</p>
+      <p className="ui-text-muted">{label}</p>
       <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>
   );

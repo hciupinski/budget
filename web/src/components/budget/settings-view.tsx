@@ -14,9 +14,13 @@ import {
 import {
   CURRENCY_OPTIONS,
   DEFAULT_CURRENCY,
+  DEFAULT_THEME,
   readCurrencySetting,
+  readThemeSetting,
   refreshCurrencySettingFromApi,
+  refreshThemeSettingFromApi,
   saveCurrencySetting,
+  saveThemeSetting,
   type CurrencyCode
 } from "@/lib/currency-settings";
 import { PlusIcon } from "@/components/budget/icons";
@@ -49,11 +53,13 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<"SECTIONS" | "GENERAL">("SECTIONS");
   const [draftSections, setDraftSections] = useState<ManagedSection[]>([]);
   const [draftCurrency, setDraftCurrency] = useState<CurrencyCode>(DEFAULT_CURRENCY);
+  const [darkModeEnabled, setDarkModeEnabled] = useState<boolean>(DEFAULT_THEME === "DARK");
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftSections(readSectionSettings());
     setDraftCurrency(readCurrencySetting());
+    setDarkModeEnabled(readThemeSetting() === "DARK");
     void refreshSectionSettingsFromApi().then((sections) => {
       if (sections) {
         setDraftSections(sections);
@@ -62,6 +68,11 @@ export function SettingsView() {
     void refreshCurrencySettingFromApi().then((currency) => {
       if (currency) {
         setDraftCurrency(currency);
+      }
+    });
+    void refreshThemeSettingFromApi().then((theme) => {
+      if (theme) {
+        setDarkModeEnabled(theme === "DARK");
       }
     });
   }, []);
@@ -135,19 +146,19 @@ export function SettingsView() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Settings</h1>
-        <p className="text-base text-[#71768b]">Manage budget configuration and section rules</p>
+        <h1 className="ui-text-strong text-2xl md:text-3xl font-semibold tracking-[-0.02em]">Settings</h1>
+        <p className="ui-text-muted text-base">Manage budget configuration and section rules</p>
       </header>
 
-      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-4">
+      <section className="ui-border ui-surface rounded-[22px] border p-4">
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setActiveTab("SECTIONS")}
             className={`h-11 rounded-2xl px-5 text-sm md:text-base ${
               activeTab === "SECTIONS"
-                ? "bg-[#040426] text-white"
-                : "border border-[#d1d5dd] bg-[#f3f4f6] text-[#1d2230]"
+                ? "ui-btn-primary"
+                : "ui-btn-secondary ui-border border"
             }`}
           >
             Sections
@@ -158,8 +169,8 @@ export function SettingsView() {
             onClick={() => setActiveTab("GENERAL")}
             className={`h-11 rounded-2xl px-5 text-sm md:text-base ${
               activeTab === "GENERAL"
-                ? "bg-[#040426] text-white"
-                : "border border-[#d1d5dd] bg-[#f3f4f6] text-[#1d2230]"
+                ? "ui-btn-primary"
+                : "ui-btn-secondary ui-border border"
             }`}
           >
             General
@@ -168,11 +179,11 @@ export function SettingsView() {
       </section>
 
       {activeTab === "SECTIONS" ? (
-        <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
+        <section className="ui-border ui-surface rounded-[22px] border p-6 md:p-8">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Section Management</h2>
-              <p className="mt-1 text-sm md:text-base text-[#73788d]">
+              <h2 className="ui-text-strong text-xl md:text-2xl font-medium">Section Management</h2>
+              <p className="ui-text-muted mt-1 text-sm md:text-base">
                 Add, edit, and remove sections. These rules are the source of truth for grouping in Annual and Monthly views.
               </p>
             </div>
@@ -180,7 +191,7 @@ export function SettingsView() {
             <button
               type="button"
               onClick={addSection}
-              className="inline-flex h-11 items-center gap-2 rounded-2xl bg-[#040426] px-4 text-sm md:text-base text-white"
+              className="ui-btn-primary inline-flex h-11 items-center gap-2 rounded-2xl px-4 text-sm md:text-base"
             >
               <PlusIcon size={18} />
               Add Section
@@ -192,20 +203,20 @@ export function SettingsView() {
               <article key={section.id} className={`rounded-[18px] border p-4 ${sectionCardTone(section.kind)}`}>
                 <div className="grid gap-3 lg:grid-cols-[1.2fr_0.9fr_1.4fr_auto] lg:items-end">
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-wide text-[#6f7489]">Section Name</label>
+                    <label className="ui-text-muted mb-1 block text-xs uppercase tracking-wide">Section Name</label>
                     <Input
                       value={section.name}
                       onChange={(event) => updateSection(section.id, { name: event.target.value })}
-                      className="h-11 rounded-xl border-[#cfd3da] bg-[#f8f9fb]"
+                      className="ui-control h-11 rounded-xl"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-wide text-[#6f7489]">Type</label>
+                    <label className="ui-text-muted mb-1 block text-xs uppercase tracking-wide">Type</label>
                     <select
                       value={section.kind}
                       onChange={(event) => updateSection(section.id, { kind: event.target.value as ManagedSectionKind })}
-                      className="h-11 w-full rounded-xl border border-[#cfd3da] bg-[#f8f9fb] px-3 text-sm text-[#1f2430]"
+                      className="ui-control h-11 w-full rounded-xl border px-3 text-sm"
                     >
                       {KIND_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -216,7 +227,7 @@ export function SettingsView() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-xs uppercase tracking-wide text-[#6f7489]">Category Keywords</label>
+                    <label className="ui-text-muted mb-1 block text-xs uppercase tracking-wide">Category Keywords</label>
                     <Input
                       value={section.keywords.join(", ")}
                       onChange={(event) =>
@@ -228,7 +239,7 @@ export function SettingsView() {
                         })
                       }
                       placeholder="e.g. software, office, consulting"
-                      className="h-11 rounded-xl border-[#cfd3da] bg-[#f8f9fb]"
+                      className="ui-control h-11 rounded-xl"
                     />
                   </div>
 
@@ -237,7 +248,7 @@ export function SettingsView() {
                       type="button"
                       onClick={() => moveSection(section.id, -1)}
                       disabled={index === 0}
-                      className="h-11 rounded-xl border border-[#c6cad2] bg-[#f8f9fb] px-3 text-sm text-[#1d2230] disabled:opacity-40"
+                      className="ui-btn-secondary ui-border h-11 rounded-xl border px-3 text-sm disabled:opacity-40"
                     >
                       Up
                     </button>
@@ -245,7 +256,7 @@ export function SettingsView() {
                       type="button"
                       onClick={() => moveSection(section.id, 1)}
                       disabled={index === draftSections.length - 1}
-                      className="h-11 rounded-xl border border-[#c6cad2] bg-[#f8f9fb] px-3 text-sm text-[#1d2230] disabled:opacity-40"
+                      className="ui-btn-secondary ui-border h-11 rounded-xl border px-3 text-sm disabled:opacity-40"
                     >
                       Down
                     </button>
@@ -262,7 +273,7 @@ export function SettingsView() {
             ))}
 
             {draftSections.length === 0 ? (
-              <p className="text-sm md:text-base text-[#6f7489]">No sections yet. Add your first section.</p>
+              <p className="ui-text-muted text-sm md:text-base">No sections yet. Add your first section.</p>
             ) : null}
           </div>
 
@@ -271,14 +282,14 @@ export function SettingsView() {
               type="button"
               onClick={onSave}
               disabled={hasDuplicateNames}
-              className="inline-flex h-11 items-center rounded-2xl bg-[#040426] px-5 text-sm md:text-base text-white disabled:opacity-60"
+              className="ui-btn-primary inline-flex h-11 items-center rounded-2xl px-5 text-sm md:text-base disabled:opacity-60"
             >
               Save Sections
             </button>
             <button
               type="button"
               onClick={onReset}
-              className="inline-flex h-11 items-center rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-5 text-sm md:text-base text-[#1d2230]"
+              className="ui-btn-secondary ui-border inline-flex h-11 items-center rounded-2xl border px-5 text-sm md:text-base"
             >
               Reset to Default
             </button>
@@ -287,16 +298,16 @@ export function SettingsView() {
               <p className="text-sm text-[#b42318]">Section names must be unique.</p>
             ) : null}
 
-            {message ? <p className="text-sm text-[#5f647a]">{message}</p> : null}
+            {message ? <p className="ui-text-muted text-sm">{message}</p> : null}
           </div>
         </section>
       ) : (
-        <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-          <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">General</h2>
-          <p className="mt-2 text-sm md:text-base text-[#73788d]">Configure global display preferences.</p>
+        <section className="ui-border ui-surface rounded-[22px] border p-6 md:p-8">
+          <h2 className="ui-text-strong text-xl md:text-2xl font-medium">General</h2>
+          <p className="ui-text-muted mt-2 text-sm md:text-base">Configure global display preferences.</p>
 
-          <div className="mt-6 max-w-[420px] rounded-[18px] border border-[#cfd3da] bg-[#f8f9fb] p-4">
-            <label className="mb-2 block text-xs uppercase tracking-wide text-[#6f7489]">Currency</label>
+          <div className="ui-border ui-surface-soft mt-6 max-w-[420px] rounded-[18px] border p-4">
+            <label className="ui-text-muted mb-2 block text-xs uppercase tracking-wide">Currency</label>
             <select
               value={draftCurrency}
               onChange={(event) => {
@@ -305,7 +316,7 @@ export function SettingsView() {
                 setDraftCurrency(saved);
                 setMessage(`Currency updated to ${saved}.`);
               }}
-              className="h-11 w-full rounded-xl border border-[#cfd3da] bg-white px-3 text-sm text-[#1f2430]"
+              className="ui-control h-11 w-full rounded-xl border px-3 text-sm"
             >
               {CURRENCY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -313,13 +324,44 @@ export function SettingsView() {
                 </option>
               ))}
             </select>
-            <p className="mt-2 text-sm text-[#6f7489]">
+            <p className="ui-text-muted mt-2 text-sm">
               Changes how amounts are displayed across the whole UI. No recalculation is applied.
             </p>
           </div>
 
+          <div className="ui-border ui-surface-soft mt-4 max-w-[420px] rounded-[18px] border p-4">
+            <p className="ui-text-muted text-xs uppercase tracking-wide">Dark Mode</p>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <p className="ui-text text-sm">
+                {darkModeEnabled ? "Enabled" : "Disabled"}
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={darkModeEnabled}
+                onClick={() => {
+                  const next = !darkModeEnabled;
+                  setDarkModeEnabled(next);
+                  const saved = saveThemeSetting(next ? "DARK" : "LIGHT");
+                  setMessage(`Theme updated to ${saved === "DARK" ? "Dark" : "Light"} mode.`);
+                }}
+                data-state={darkModeEnabled ? "on" : "off"}
+                className="ui-switch-track relative h-8 w-14 rounded-full border transition-colors"
+              >
+                <span
+                  className={`ui-switch-thumb absolute left-1 top-1 h-6 w-6 rounded-full transition-transform ${
+                    darkModeEnabled ? "translate-x-6" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+            <p className="ui-text-muted mt-2 text-sm">
+              Applies dark appearance across the whole UI.
+            </p>
+          </div>
+
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            {message ? <p className="text-sm text-[#5f647a]">{message}</p> : null}
+            {message ? <p className="ui-text-muted text-sm">{message}</p> : null}
           </div>
         </section>
       )}

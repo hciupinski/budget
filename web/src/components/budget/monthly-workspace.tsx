@@ -635,22 +635,22 @@ export function MonthlyWorkspace() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-3xl">Monthly Planning</h1>
-          <p className="text-base text-[#71768b]">Manage your monthly budget and track payments</p>
+          <h1 className="ui-text-strong text-2xl font-semibold tracking-[-0.02em] md:text-3xl">Monthly Planning</h1>
+          <p className="ui-text-muted text-base">Manage your monthly budget and track payments</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-          <div className="inline-flex h-12 items-center rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] p-1">
+          <div className="ui-btn-secondary ui-border inline-flex h-12 items-center rounded-2xl border p-1">
             <button
               type="button"
-              className="grid h-10 w-10 place-items-center rounded-xl text-[#1a1e2a] hover:bg-[#e4e7ed]"
+              className="ui-text ui-hover-soft grid h-10 w-10 place-items-center rounded-xl"
               onClick={() => shiftMonth(-1)}
             >
               <ChevronLeftIcon size={20} />
             </button>
 
             <select
-              className="h-10 min-w-[170px] rounded-xl bg-[#e8eaee] px-3 text-sm text-[#1c202c]"
+              className="ui-control h-10 min-w-[170px] rounded-xl px-3 text-sm"
               value={month}
               onChange={(event) => setMonth(Number.parseInt(event.target.value, 10))}
             >
@@ -662,7 +662,7 @@ export function MonthlyWorkspace() {
             </select>
 
             <select
-              className="ml-2 h-10 min-w-[110px] rounded-xl bg-[#e8eaee] px-3 text-sm text-[#1c202c]"
+              className="ui-control ml-2 h-10 min-w-[110px] rounded-xl px-3 text-sm"
               value={year}
               onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
             >
@@ -678,7 +678,7 @@ export function MonthlyWorkspace() {
 
             <button
               type="button"
-              className="ml-2 grid h-10 w-10 place-items-center rounded-xl text-[#1a1e2a] hover:bg-[#e4e7ed]"
+              className="ui-text ui-hover-soft ml-2 grid h-10 w-10 place-items-center rounded-xl"
               onClick={() => shiftMonth(1)}
             >
               <ChevronRightIcon size={20} />
@@ -687,7 +687,7 @@ export function MonthlyWorkspace() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
+            className="ui-btn-secondary ui-border ui-hover-soft inline-flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm md:text-base"
             onClick={() => void generateFromAnnualPlan()}
             disabled={saving || loading}
           >
@@ -697,7 +697,7 @@ export function MonthlyWorkspace() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm text-white hover:opacity-95 disabled:opacity-60 md:text-base"
+            className="ui-btn-primary inline-flex h-12 items-center gap-2 rounded-2xl px-5 text-sm disabled:opacity-60 md:text-base"
             onClick={() => void saveAllActions()}
             disabled={!workspace || saving || loading}
           >
@@ -707,8 +707,8 @@ export function MonthlyWorkspace() {
         </div>
       </header>
 
-      {message ? <p className="text-sm text-[#686e84] md:text-base">{message}</p> : null}
-      {loading ? <p className="text-sm text-[#686e84] md:text-base">Loading monthly plan...</p> : null}
+      {message ? <p className="ui-text-muted text-sm md:text-base">{message}</p> : null}
+      {loading ? <p className="ui-text-muted text-sm md:text-base">Loading monthly plan...</p> : null}
 
       {workspace ? (
         <>
@@ -741,10 +741,10 @@ export function MonthlyWorkspace() {
             />
           </section>
 
-          <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
-            <div className="border-b border-[#d5d9e0] p-5 md:p-6">
-              <h2 className="text-xl font-medium text-[#171a24] md:text-2xl">Budget Items for {MONTH_LABELS[month - 1]} {year}</h2>
-              <p className="mt-2 text-sm text-[#73788d] md:text-base">Manage budgeted amounts, track actual spending, and update payment status</p>
+          <section className="ui-border ui-surface overflow-hidden rounded-[22px] border">
+            <div className="ui-border border-b p-5 md:p-6">
+              <h2 className="ui-text-strong text-xl font-medium md:text-2xl">Budget Items for {MONTH_LABELS[month - 1]} {year}</h2>
+              <p className="ui-text-muted mt-2 text-sm md:text-base">Manage budgeted amounts, track actual spending, and update payment status</p>
             </div>
 
             <div className="overflow-x-auto">
@@ -971,8 +971,8 @@ export function MonthlyWorkspace() {
             </div>
           </section>
 
-          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
-            <h2 className="text-xl font-medium text-[#171a24] md:text-2xl">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
+          <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
+            <h2 className="ui-text-strong text-xl font-medium md:text-2xl">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
 
             <div className="mt-6 grid gap-8 xl:grid-cols-2">
               <SummaryColumn
@@ -1013,10 +1013,10 @@ function MonthlyMetricCard({
   danger?: boolean;
 }) {
   return (
-    <div className={`rounded-[20px] border bg-[#f6f7f9] p-4 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
-      <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
+    <div className={`ui-surface rounded-[20px] border p-4 ${danger ? "border-[#f43f5e]" : "ui-border"}`}>
+      <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
       <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(planned)}</p>
-      <p className="mt-1 text-sm text-[#72778b] md:text-base">
+      <p className="ui-text-muted mt-1 text-sm md:text-base">
         Actual: <span className={valueTone}>{asCurrency(actual)}</span>
       </p>
     </div>
@@ -1042,18 +1042,18 @@ function SummaryColumn({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
+      <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
 
       <SummaryLine label="Total Business Income" value={income} valueTone="text-[#10a34a]" />
       <SummaryLine label="- Business Expenses" value={-business} valueTone="text-[#8f30ff]" />
 
-      <div className="border-t border-[#d7dbe2]" />
+      <div className="ui-border border-t" />
 
       <SummaryLine label="Transfer to Personal" value={transfer} valueTone="text-[#10a34a]" />
       <SummaryLine label="- Personal Expenses" value={-personal} valueTone="text-[#f35b00]" />
       <SummaryLine label="- Savings" value={-savings} valueTone="text-[#2563eb]" />
 
-      <div className="border-t border-[#d7dbe2]" />
+      <div className="ui-border border-t" />
 
       <SummaryLine label="Remainder" value={remainder} valueTone={remainder >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"} />
     </div>
@@ -1071,7 +1071,7 @@ function SummaryLine({
 }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm md:text-base">
-      <p className="text-[#6f7489]">{label}</p>
+      <p className="ui-text-muted">{label}</p>
       <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>
   );

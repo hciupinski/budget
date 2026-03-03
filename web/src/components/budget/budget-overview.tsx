@@ -166,15 +166,15 @@ export function BudgetOverview() {
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Budget Dashboard</h1>
-        <p className="text-base text-[#71768b]">
+        <h1 className="ui-text-strong text-2xl md:text-3xl font-semibold tracking-[-0.02em]">Budget Dashboard</h1>
+        <p className="ui-text-muted text-base">
           {monthLongLabel(month)} {year} - Current Month Overview
         </p>
       </header>
 
-      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
-        <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Monthly Money Flow</h2>
-        <p className="mt-2 text-sm md:text-base text-[#73788d]">Track how your business income flows through to personal finances</p>
+      <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
+        <h2 className="ui-text-strong text-xl md:text-2xl font-medium">Monthly Money Flow</h2>
+        <p className="ui-text-muted mt-2 text-sm md:text-base">Track how your business income flows through to personal finances</p>
 
         <div className="mt-8 grid gap-3 xl:grid-cols-[1fr_auto_1fr_auto_1fr] xl:items-center">
           <FlowCard
@@ -183,14 +183,14 @@ export function BudgetOverview() {
             value={monthMetrics.businessIncome}
             icon={<BusinessIcon size={22} />}
           />
-          <ArrowRightIcon size={30} className="mx-auto hidden text-[#6d7184] xl:block" />
+          <ArrowRightIcon size={30} className="ui-text-muted mx-auto hidden xl:block" />
           <FlowCard
             tone="purple"
             label="Business Expenses"
             value={monthMetrics.businessExpenses}
             icon={<span className="text-sm font-semibold">$</span>}
           />
-          <ArrowRightIcon size={30} className="mx-auto hidden text-[#6d7184] xl:block" />
+          <ArrowRightIcon size={30} className="ui-text-muted mx-auto hidden xl:block" />
           <FlowCard
             tone="green"
             label="To Personal"
@@ -199,9 +199,9 @@ export function BudgetOverview() {
           />
         </div>
 
-        <div className="my-8 border-t border-[#d9dce2]" />
+        <div className="ui-border my-8 border-t" />
 
-        <h3 className="text-lg md:text-xl font-medium text-[#171a24]">Personal Distribution</h3>
+        <h3 className="ui-text-strong text-lg md:text-xl font-medium">Personal Distribution</h3>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <DistributionCard
             tone="orange"
@@ -221,9 +221,9 @@ export function BudgetOverview() {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {ACCOUNT_SNAPSHOT.map((account) => (
-          <div key={account.label} className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-4">
-            <p className="text-sm md:text-base text-[#70768b]">{account.label}</p>
-            <p className="mt-1 text-xl md:text-2xl font-medium text-[#141824]">{asCurrency(account.value)}</p>
+          <div key={account.label} className="ui-border ui-surface rounded-[20px] border p-4">
+            <p className="ui-text-muted text-sm md:text-base">{account.label}</p>
+            <p className="ui-text-strong mt-1 text-xl md:text-2xl font-medium">{asCurrency(account.value)}</p>
           </div>
         ))}
       </section>
@@ -253,8 +253,8 @@ function FlowCard({
       <div className="flex items-center gap-3">
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#2d7af5] text-white">{icon}</div>
         <div>
-          <p className="text-sm text-[#6d7287]">{label}</p>
-          <p className="text-xl md:text-2xl font-medium text-[#121621]">{asCurrency(value)}</p>
+          <p className="ui-text-muted text-sm">{label}</p>
+          <p className="ui-text-strong text-xl md:text-2xl font-medium">{asCurrency(value)}</p>
         </div>
       </div>
     </div>
@@ -286,11 +286,11 @@ function DistributionCard({
 
   return (
     <div className={`rounded-[18px] border p-4 ${classes[tone]}`}>
-      <div className="flex items-center gap-2 text-[#6d7287]">
+      <div className="ui-text-muted flex items-center gap-2">
         <span className={`grid h-6 w-6 place-items-center rounded-md text-white ${iconBg[tone]}`}>{icon}</span>
         <span className="text-sm md:text-base">{label}</span>
       </div>
-      <p className="mt-2 text-lg md:text-xl font-medium text-[#141824]">{asCurrency(value)}</p>
+      <p className="ui-text-strong mt-2 text-lg md:text-xl font-medium">{asCurrency(value)}</p>
     </div>
   );
 }

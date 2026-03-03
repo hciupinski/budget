@@ -162,7 +162,9 @@ public sealed record UpdatePlannerCustomizationRequest(
     IReadOnlyList<string>? HiddenMonthlyApiRows);
 
 public sealed record GeneralSettingsResponse(
-    string Currency);
+    string Currency,
+    string Theme);
 
 public sealed record UpdateGeneralSettingsRequest(
-    [property: Required] string Currency);
+    string? Currency,
+    string? Theme);

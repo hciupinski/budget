@@ -17,6 +17,26 @@
   --input: 223 15% 84%;
   --ring: 232 66% 48%;
   --radius: 1rem;
+  --ui-page-bg: #f3f4f6;
+  --ui-surface: #f6f7f9;
+  --ui-surface-soft: #eef0f4;
+  --ui-border: #cfd3da;
+  --ui-text: #171923;
+  --ui-text-muted: #6f7489;
+  --ui-text-strong: #0f1321;
+  --ui-control-bg: #f8f9fb;
+  --ui-control-text: #1f2430;
+  --ui-control-border: #cfd3da;
+  --ui-nav-icon: #151827;
+  --ui-btn-secondary-bg: #f3f4f6;
+  --ui-btn-secondary-text: #171b27;
+  --ui-btn-secondary-border: #d1d5dd;
+  --ui-btn-primary-bg: #040426;
+  --ui-btn-primary-text: #ffffff;
+  --ui-btn-primary-bg-hover: #09093a;
+  --ui-switch-track-off: #e9edf4;
+  --ui-switch-track-on: #2554b8;
+  --ui-switch-thumb: #ffffff;
 }
 
 * {
@@ -34,6 +54,242 @@ body {
   min-height: 100vh;
   font-size: 12px;
   line-height: 1.35;
+}
+
+html[data-theme="dark"] body {
+  background: #0b1118;
+  color: #dbe5f3;
+}
+
+html[data-theme="dark"] {
+  --ui-page-bg: #0f1724;
+  --ui-surface: #141c27;
+  --ui-surface-soft: #1a2431;
+  --ui-border: #314054;
+  --ui-text: #e7eefb;
+  --ui-text-muted: #a6b7cf;
+  --ui-text-strong: #f2f7ff;
+  --ui-control-bg: #1a2431;
+  --ui-control-text: #e7eefb;
+  --ui-control-border: #314054;
+  --ui-nav-icon: #d7e1f2;
+  --ui-btn-secondary-bg: #1a2431;
+  --ui-btn-secondary-text: #e7eefb;
+  --ui-btn-secondary-border: #314054;
+  --ui-btn-primary-bg: #1f4fb7;
+  --ui-btn-primary-text: #f8fbff;
+  --ui-btn-primary-bg-hover: #275dcf;
+  --ui-switch-track-off: #334155;
+  --ui-switch-track-on: #2563eb;
+  --ui-switch-thumb: #ffffff;
+}
+
+/* Semantic UI utilities for theme-safe styling */
+.ui-page-bg {
+  background-color: var(--ui-page-bg) !important;
+  color: var(--ui-text) !important;
+}
+
+.ui-surface {
+  background-color: var(--ui-surface) !important;
+}
+
+.ui-surface-soft {
+  background-color: var(--ui-surface-soft) !important;
+}
+
+.ui-hover-soft:hover {
+  background-color: var(--ui-surface-soft) !important;
+}
+
+.ui-border {
+  border-color: var(--ui-border) !important;
+}
+
+.ui-text {
+  color: var(--ui-text) !important;
+}
+
+.ui-text-strong {
+  color: var(--ui-text-strong) !important;
+}
+
+.ui-text-muted {
+  color: var(--ui-text-muted) !important;
+}
+
+.ui-control {
+  background-color: var(--ui-control-bg) !important;
+  color: var(--ui-control-text) !important;
+  border-color: var(--ui-control-border) !important;
+}
+
+.ui-nav-icon {
+  color: var(--ui-nav-icon) !important;
+}
+
+.ui-btn-secondary {
+  background-color: var(--ui-btn-secondary-bg) !important;
+  color: var(--ui-btn-secondary-text) !important;
+  border-color: var(--ui-btn-secondary-border) !important;
+}
+
+.ui-btn-primary {
+  background-color: var(--ui-btn-primary-bg) !important;
+  color: var(--ui-btn-primary-text) !important;
+}
+
+.ui-btn-primary:hover {
+  background-color: var(--ui-btn-primary-bg-hover) !important;
+}
+
+.ui-switch-track {
+  border-color: var(--ui-border) !important;
+  background-color: var(--ui-switch-track-off) !important;
+}
+
+.ui-switch-track[data-state="on"] {
+  background-color: var(--ui-switch-track-on) !important;
+}
+
+.ui-switch-thumb {
+  background-color: var(--ui-switch-thumb) !important;
+}
+
+html[data-theme="dark"] .bg-\[\#f3f4f6\],
+html[data-theme="dark"] .bg-\[\#f6f7f9\],
+html[data-theme="dark"] .bg-\[\#f8f9fb\],
+html[data-theme="dark"] .bg-\[\#f3f4f6\] {
+  background-color: #141c27 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#eceef2\],
+html[data-theme="dark"] .bg-\[\#e9ebef\],
+html[data-theme="dark"] .bg-\[\#eef0f4\],
+html[data-theme="dark"] .bg-\[\#f3f4f6\],
+html[data-theme="dark"] .bg-\[\#e8eaee\],
+html[data-theme="dark"] .bg-\[\#e9eaed\],
+html[data-theme="dark"] .bg-\[\#eff1f4\] {
+  background-color: #1a2431 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e8f4ee\] {
+  background-color: #173027 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#efebf7\] {
+  background-color: #2a2137 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#f5efe5\] {
+  background-color: #30271f !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e8eef7\] {
+  background-color: #1a273a !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e5f4eb\] {
+  background-color: #193327 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e2f0f0\] {
+  background-color: #183136 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e9edf8\] {
+  background-color: #1c2940 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e6edf8\] {
+  background-color: #1d2a40 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#e8f1fb\] {
+  background-color: #1e2e47 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#f1ebf8\] {
+  background-color: #2a2240 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#f5efe6\] {
+  background-color: #332a21 !important;
+}
+
+html[data-theme="dark"] .bg-\[\#fff1f4\] {
+  background-color: #3f1e2b !important;
+}
+
+html[data-theme="dark"] .border-\[\#d6d9de\],
+html[data-theme="dark"] .border-\[\#cfd3da\],
+html[data-theme="dark"] .border-\[\#cdd2da\],
+html[data-theme="dark"] .border-\[\#cad0d8\],
+html[data-theme="dark"] .border-\[\#d1d5dd\],
+html[data-theme="dark"] .border-\[\#c6cad2\],
+html[data-theme="dark"] .border-\[\#d5d9e0\],
+html[data-theme="dark"] .border-\[\#d7dbe2\],
+html[data-theme="dark"] .border-\[\#ccd2db\],
+html[data-theme="dark"] .border-\[\#c8ccd4\] {
+  border-color: #314054 !important;
+}
+
+html[data-theme="dark"] .text-\[\#0f1321\],
+html[data-theme="dark"] .text-\[\#171a24\],
+html[data-theme="dark"] .text-\[\#171b25\],
+html[data-theme="dark"] .text-\[\#141824\],
+html[data-theme="dark"] .text-\[\#121621\],
+html[data-theme="dark"] .text-\[\#1f2430\],
+html[data-theme="dark"] .text-\[\#1b1f2b\],
+html[data-theme="dark"] .text-\[\#1d2230\],
+html[data-theme="dark"] .text-\[\#171923\],
+html[data-theme="dark"] .text-\[\#111827\],
+html[data-theme="dark"] .text-\[\#171b27\],
+html[data-theme="dark"] .text-\[\#202532\],
+html[data-theme="dark"] .text-\[\#1a1e2a\],
+html[data-theme="dark"] .text-\[\#1a1f2b\],
+html[data-theme="dark"] .text-\[\#1c202c\],
+html[data-theme="dark"] .text-\[\#1f2431\],
+html[data-theme="dark"] .text-\[\#30354a\],
+html[data-theme="dark"] .text-\[\#30384b\],
+html[data-theme="dark"] .text-\[\#44495f\],
+html[data-theme="dark"] .text-\[\#151827\] {
+  color: #e7eefb !important;
+}
+
+html[data-theme="dark"] .text-\[\#71768b\],
+html[data-theme="dark"] .text-\[\#73788d\],
+html[data-theme="dark"] .text-\[\#70768b\],
+html[data-theme="dark"] .text-\[\#72778b\],
+html[data-theme="dark"] .text-\[\#6f7489\],
+html[data-theme="dark"] .text-\[\#6d7287\],
+html[data-theme="dark"] .text-\[\#6f748a\],
+html[data-theme="dark"] .text-\[\#686e84\],
+html[data-theme="dark"] .text-\[\#656a80\],
+html[data-theme="dark"] .text-\[\#76809a\],
+html[data-theme="dark"] .text-\[\#5f647a\],
+html[data-theme="dark"] .text-\[\#7c8094\] {
+  color: #9caec8 !important;
+}
+
+html[data-theme="dark"] .hover\:bg-\[\#e6e8ee\]:hover,
+html[data-theme="dark"] .hover\:bg-\[\#e9ebf0\]:hover,
+html[data-theme="dark"] .hover\:bg-\[\#e3e6ec\]:hover,
+html[data-theme="dark"] .hover\:bg-\[\#e4e7ed\]:hover {
+  background-color: #243244 !important;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  background-color: var(--ui-control-bg);
+  color: var(--ui-control-text);
+  border-color: var(--ui-control-border);
+}
+
+html[data-theme="dark"] select option {
+  background: #1a2431;
+  color: #e7eefb;
 }
 
 input.numeric-input::-webkit-outer-spin-button,

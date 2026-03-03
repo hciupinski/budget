@@ -39,6 +39,12 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         "EUR"
     };
 
+    private static readonly HashSet<string> SupportedThemes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "LIGHT",
+        "DARK"
+    };
+
     private static readonly IReadOnlyList<ManagedSectionStateItem> DefaultManagedSections =
     [
         new ManagedSectionStateItem
@@ -227,7 +233,9 @@ public sealed class BudgetService(BudgetDbContext dbContext)
     public async Task<GeneralSettingsResponse> GetGeneralSettingsAsync(CancellationToken cancellationToken)
     {
         var state = await LoadUiStateAsync<GeneralSettingsState>(GeneralSettingsStateKey, cancellationToken);
-        return new GeneralSettingsResponse(NormalizeCurrencyCode(state?.Currency));
+        return new GeneralSettingsResponse(
+            NormalizeCurrencyCode(state?.Currency),
+            NormalizeThemeMode(state?.Theme));
     }
 
     public async Task<GeneralSettingsResponse> SaveGeneralSettingsAsync(
@@ -235,13 +243,22 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         string actor,
         CancellationToken cancellationToken)
     {
-        var currency = NormalizeCurrencyCode(request.Currency);
+        var existing = await LoadUiStateAsync<GeneralSettingsState>(GeneralSettingsStateKey, cancellationToken)
+            ?? new GeneralSettingsState();
+
+        var currency = request.Currency is null
+            ? NormalizeCurrencyCode(existing.Currency)
+            : NormalizeCurrencyCode(request.Currency);
+        var theme = request.Theme is null
+            ? NormalizeThemeMode(existing.Theme)
+            : NormalizeThemeMode(request.Theme);
 
         await UpsertUiStateEntryAsync(
             GeneralSettingsStateKey,
             new GeneralSettingsState
             {
-                Currency = currency
+                Currency = currency,
+                Theme = theme
             },
             cancellationToken);
 
@@ -254,13 +271,14 @@ public sealed class BudgetService(BudgetDbContext dbContext)
             ChangedAt = DateTimeOffset.UtcNow,
             Payload = JsonSerializer.Serialize(new
             {
-                currency
+                currency,
+                theme
             })
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new GeneralSettingsResponse(currency);
+        return new GeneralSettingsResponse(currency, theme);
     }
 
     public async Task<AnnualPlanResponse> GetAnnualPlanAsync(int year, CancellationToken cancellationToken)
@@ -1035,6 +1053,17 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         return SupportedCurrencies.Contains(normalized) ? normalized : "PLN";
     }
 
+    private static string NormalizeThemeMode(string? theme)
+    {
+        if (string.IsNullOrWhiteSpace(theme))
+        {
+            return "LIGHT";
+        }
+
+        var normalized = theme.Trim().ToUpperInvariant();
+        return SupportedThemes.Contains(normalized) ? normalized : "LIGHT";
+    }
+
     private static void ValidateYear(int year)
     {
         if (year < 2000 || year > 2100)
@@ -1197,5 +1226,6 @@ public sealed class BudgetService(BudgetDbContext dbContext)
     private sealed class GeneralSettingsState
     {
         public string Currency { get; set; } = "PLN";
+        public string Theme { get; set; } = "LIGHT";
     }
 }
