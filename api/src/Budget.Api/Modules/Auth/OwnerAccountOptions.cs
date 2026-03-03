@@ -8,9 +8,9 @@ public sealed class OwnerAccountOptions
 
     [Required]
     [EmailAddress]
-    public string Email { get; init; }
+    public string Email { get; init; } = string.Empty;
 
     [Required]
     [MinLength(12)]
-    public string Password { get; init; }
+    public string Password { get; init; } = string.Empty;
 }

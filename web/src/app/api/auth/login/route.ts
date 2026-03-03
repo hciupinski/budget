@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { API_BASE_URL } from "@/lib/api";
+import { shouldUseSecureCookie } from "@/lib/session-cookie";
 
 const SESSION_COOKIE = "budget_session";
 
@@ -30,13 +31,34 @@ export async function POST(request: Request) {
 
   const data = (await response.json()) as { accessToken: string };
   const nextResponse = NextResponse.json({ ok: true });
+  const isSecureRequest = shouldUseSecureCookie(request);
+
+  nextResponse.cookies.set({
+    name: SESSION_COOKIE,
+    value: "",
+    maxAge: 0,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: true,
+    path: "/"
+  });
+
+  nextResponse.cookies.set({
+    name: SESSION_COOKIE,
+    value: "",
+    maxAge: 0,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: false,
+    path: "/"
+  });
 
   nextResponse.cookies.set({
     name: SESSION_COOKIE,
     value: data.accessToken,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest,
     path: "/",
     maxAge: 60 * 60 * 8
   });
