@@ -126,14 +126,16 @@ public sealed record MonthlyCustomItemResponse(
     string Name,
     decimal PlannedAmount,
     decimal? ActualAmount,
-    string Status);
+    string Status,
+    string? AnnualCustomItemId);
 
 public sealed record PlannerCustomizationResponse(
     IReadOnlyList<AnnualCustomItemResponse> AnnualCustomItems,
     IReadOnlyList<MonthlyCustomItemResponse> MonthlyCustomItems,
     IReadOnlyDictionary<string, string> NameOverrides,
     IReadOnlyList<string> HiddenAnnualApiRows,
-    IReadOnlyList<string> HiddenMonthlyApiRows);
+    IReadOnlyList<string> HiddenMonthlyApiRows,
+    IReadOnlyList<string> OneTimeAnnualRows);
 
 public sealed record AnnualCustomItemInput(
     [property: Required] string Id,
@@ -152,14 +154,16 @@ public sealed record MonthlyCustomItemInput(
     [property: Required] string Name,
     decimal PlannedAmount,
     decimal? ActualAmount,
-    [property: Required] string Status);
+    [property: Required] string Status,
+    string? AnnualCustomItemId);
 
 public sealed record UpdatePlannerCustomizationRequest(
     IReadOnlyList<AnnualCustomItemInput>? AnnualCustomItems,
     IReadOnlyList<MonthlyCustomItemInput>? MonthlyCustomItems,
     IReadOnlyDictionary<string, string>? NameOverrides,
     IReadOnlyList<string>? HiddenAnnualApiRows,
-    IReadOnlyList<string>? HiddenMonthlyApiRows);
+    IReadOnlyList<string>? HiddenMonthlyApiRows,
+    IReadOnlyList<string>? OneTimeAnnualRows);
 
 public sealed record GeneralSettingsResponse(
     string Currency,

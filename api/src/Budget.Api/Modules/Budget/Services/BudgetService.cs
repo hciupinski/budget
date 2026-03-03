@@ -199,11 +199,13 @@ public sealed class BudgetService(BudgetDbContext dbContext)
                 Name = x.Name,
                 PlannedAmount = x.PlannedAmount,
                 ActualAmount = x.ActualAmount,
-                Status = x.Status
+                Status = x.Status,
+                AnnualCustomItemId = x.AnnualCustomItemId
             }).ToList() ?? [],
             NameOverrides = request.NameOverrides?.ToDictionary(x => x.Key, x => x.Value) ?? [],
             HiddenAnnualApiRows = request.HiddenAnnualApiRows?.ToList() ?? [],
-            HiddenMonthlyApiRows = request.HiddenMonthlyApiRows?.ToList() ?? []
+            HiddenMonthlyApiRows = request.HiddenMonthlyApiRows?.ToList() ?? [],
+            OneTimeAnnualRows = request.OneTimeAnnualRows?.ToList() ?? []
         });
 
         await UpsertUiStateEntryAsync(PlannerCustomizationStateKey, normalized, cancellationToken);
@@ -221,7 +223,8 @@ public sealed class BudgetService(BudgetDbContext dbContext)
                 monthlyCustomItems = normalized.MonthlyCustomItems.Count,
                 nameOverrides = normalized.NameOverrides.Count,
                 hiddenAnnualApiRows = normalized.HiddenAnnualApiRows.Count,
-                hiddenMonthlyApiRows = normalized.HiddenMonthlyApiRows.Count
+                hiddenMonthlyApiRows = normalized.HiddenMonthlyApiRows.Count,
+                oneTimeAnnualRows = normalized.OneTimeAnnualRows.Count
             })
         });
 
@@ -851,10 +854,12 @@ public sealed class BudgetService(BudgetDbContext dbContext)
                 x.Name,
                 x.PlannedAmount,
                 x.ActualAmount,
-                x.Status)).ToArray(),
+                x.Status,
+                x.AnnualCustomItemId)).ToArray(),
             state.NameOverrides,
             state.HiddenAnnualApiRows,
-            state.HiddenMonthlyApiRows);
+            state.HiddenMonthlyApiRows,
+            state.OneTimeAnnualRows);
     }
 
     private static List<ManagedSectionStateItem> NormalizeManagedSections(IEnumerable<ManagedSectionStateItem>? sections)
@@ -979,7 +984,8 @@ public sealed class BudgetService(BudgetDbContext dbContext)
                 ActualAmount = item.ActualAmount.HasValue
                     ? decimal.Round(item.ActualAmount.Value, 2, MidpointRounding.AwayFromZero)
                     : null,
-                Status = NormalizeMonthlyStatus(item.Status)
+                Status = NormalizeMonthlyStatus(item.Status),
+                AnnualCustomItemId = string.IsNullOrWhiteSpace(item.AnnualCustomItemId) ? null : item.AnnualCustomItemId.Trim()
             });
         }
 
@@ -1010,13 +1016,21 @@ public sealed class BudgetService(BudgetDbContext dbContext)
             .Select(x => x!)
             .ToList();
 
+        var oneTimeAnnualRows = state.OneTimeAnnualRows
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(x => x!)
+            .ToList();
+
         return new PlannerCustomizationState
         {
             AnnualCustomItems = annual,
             MonthlyCustomItems = monthly,
             NameOverrides = overrides,
             HiddenAnnualApiRows = hiddenAnnual,
-            HiddenMonthlyApiRows = hiddenMonthly
+            HiddenMonthlyApiRows = hiddenMonthly,
+            OneTimeAnnualRows = oneTimeAnnualRows
         };
     }
 
@@ -1198,6 +1212,7 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         public Dictionary<string, string> NameOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public List<string> HiddenAnnualApiRows { get; set; } = [];
         public List<string> HiddenMonthlyApiRows { get; set; } = [];
+        public List<string> OneTimeAnnualRows { get; set; } = [];
     }
 
     private sealed class AnnualCustomItemState
@@ -1221,6 +1236,7 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         public decimal PlannedAmount { get; set; }
         public decimal? ActualAmount { get; set; }
         public string Status { get; set; } = "PLANNED";
+        public string? AnnualCustomItemId { get; set; }
     }
 
     private sealed class GeneralSettingsState

@@ -18,6 +18,8 @@ import {
 } from "@/lib/section-settings";
 import { useCurrencySetting } from "@/lib/currency-settings";
 import {
+  annualApiOneTimeRowKey,
+  annualCustomOneTimeRowKey,
   createMonthlyCustomDraft,
   PLANNER_CUSTOM_EVENT,
   refreshPlannerCustomizationFromApi,
@@ -25,6 +27,7 @@ import {
   readHiddenMonthlyApiRows,
   readMonthlyCustomItems,
   readNameOverrides,
+  readOneTimeAnnualRowKeys,
   saveHiddenMonthlyApiRows,
   saveMonthlyCustomItems,
   saveNameOverrides,
@@ -139,7 +142,8 @@ function mergeMonthlyCustomRowsFromAnnual(
   monthlyItems: MonthlyCustomItem[],
   year: number,
   month: number,
-  sectionSettings: ManagedSection[]
+  sectionSettings: ManagedSection[],
+  oneTimeAnnualRows: string[]
 ): { items: MonthlyCustomItem[]; added: number; updated: number } {
   const annualForYear = annualItems.filter((item) => item.year === year);
   if (annualForYear.length === 0) {
@@ -147,6 +151,7 @@ function mergeMonthlyCustomRowsFromAnnual(
   }
 
   const next = [...monthlyItems];
+  const oneTimeSet = new Set(oneTimeAnnualRows);
   let added = 0;
   let updated = 0;
 
@@ -154,10 +159,16 @@ function mergeMonthlyCustomRowsFromAnnual(
     const resolvedAnnual = resolveCustomSection(annualItem, sectionSettings);
     const annualKey = rowMatchKey(annualItem.name, resolvedAnnual.sectionId, resolvedAnnual.kind);
     const annualPlanned = annualItem.months[month - 1] ?? 0;
+    const oneTimeKey = annualCustomOneTimeRowKey(year, annualItem.id);
+    const isOneTimeAnnual = oneTimeSet.has(oneTimeKey);
 
     const existingIndex = next.findIndex((monthlyItem) => {
       if (monthlyItem.year !== year || monthlyItem.month !== month) {
         return false;
+      }
+
+      if (monthlyItem.annualCustomItemId && monthlyItem.annualCustomItemId === annualItem.id) {
+        return true;
       }
 
       const resolvedMonthly = resolveCustomSection(monthlyItem, sectionSettings);
@@ -165,12 +176,21 @@ function mergeMonthlyCustomRowsFromAnnual(
       return monthlyKey === annualKey;
     });
 
+    if (isOneTimeAnnual && annualPlanned === 0) {
+      if (existingIndex >= 0) {
+        next.splice(existingIndex, 1);
+        updated += 1;
+      }
+      continue;
+    }
+
     if (existingIndex >= 0) {
       const existing = next[existingIndex];
-      if (existing.plannedAmount !== annualPlanned) {
+      if (existing.plannedAmount !== annualPlanned || existing.annualCustomItemId !== annualItem.id) {
         next[existingIndex] = {
           ...existing,
-          plannedAmount: annualPlanned
+          plannedAmount: annualPlanned,
+          annualCustomItemId: annualItem.id
         };
         updated += 1;
       }
@@ -189,7 +209,8 @@ function mergeMonthlyCustomRowsFromAnnual(
       name: annualItem.name,
       sectionId: resolvedAnnual.sectionId || annualItem.sectionId,
       sectionKind: resolvedAnnual.kind,
-      plannedAmount: annualPlanned
+      plannedAmount: annualPlanned,
+      annualCustomItemId: annualItem.id
     });
     added += 1;
   }
@@ -208,6 +229,7 @@ export function MonthlyWorkspace() {
   const [monthlyCustomItems, setMonthlyCustomItems] = useState<MonthlyCustomItem[]>([]);
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
+  const [oneTimeAnnualRows, setOneTimeAnnualRows] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -264,6 +286,7 @@ export function MonthlyWorkspace() {
       setMonthlyCustomItems(readMonthlyCustomItems());
       setNameOverrides(readNameOverrides());
       setHiddenApiRows(readHiddenMonthlyApiRows());
+      setOneTimeAnnualRows(readOneTimeAnnualRowKeys());
     }
 
     syncLocalRows();
@@ -284,7 +307,8 @@ export function MonthlyWorkspace() {
       monthlyCustomItems,
       year,
       month,
-      sectionSettings
+      sectionSettings,
+      oneTimeAnnualRows
     );
 
     if (merged.added === 0 && merged.updated === 0) {
@@ -293,7 +317,7 @@ export function MonthlyWorkspace() {
 
     const saved = saveMonthlyCustomItems(merged.items);
     setMonthlyCustomItems(saved);
-  }, [annualCustomItems, month, monthlyCustomItems, sectionSettings, year]);
+  }, [annualCustomItems, month, monthlyCustomItems, oneTimeAnnualRows, sectionSettings, year]);
 
   const rowsWithMeta = useMemo(() => {
     const rows: MonthlyDisplayRow[] = [];
@@ -306,6 +330,14 @@ export function MonthlyWorkspace() {
 
       const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
       const resolved = resolveManagedSection(row.section, displayName, sectionSettings);
+      const apiOneTimeKey = annualApiOneTimeRowKey(year, row.categoryId);
+      const isOneTimePersonal =
+        resolved.kind === "PERSONAL_EXPENSES" &&
+        oneTimeAnnualRows.includes(apiOneTimeKey);
+
+      if (isOneTimePersonal && row.plannedAmount === 0) {
+        continue;
+      }
 
       rows.push({
         rowId: `api-${row.actionId}`,
@@ -344,7 +376,7 @@ export function MonthlyWorkspace() {
     }
 
     return rows;
-  }, [hiddenApiRows, month, monthlyCustomItems, nameOverrides, sectionSettings, workspace?.actions, year]);
+  }, [hiddenApiRows, month, monthlyCustomItems, nameOverrides, oneTimeAnnualRows, sectionSettings, workspace?.actions, year]);
 
   const groupedRows = useMemo(() => {
     const groupedMap = new Map<
@@ -479,6 +511,11 @@ export function MonthlyWorkspace() {
     let completed = 0;
 
     for (const action of workspace.actions) {
+      const actualAmountForSave =
+        action.status === "DONE" && action.actualAmount === null
+          ? action.plannedAmount
+          : action.actualAmount;
+
       const response = await fetch(`/api/budget/months/${year}/${month}/actions/${action.actionId}`, {
         method: "PATCH",
         headers: {
@@ -486,7 +523,7 @@ export function MonthlyWorkspace() {
         },
         body: JSON.stringify({
           status: action.status,
-          actualAmount: action.actualAmount
+          actualAmount: actualAmountForSave
         })
       });
 
@@ -836,16 +873,21 @@ export function MonthlyWorkspace() {
                                     className="h-10 min-w-[140px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm text-[#1f2430] md:text-base"
                                     value={row.status}
                                     onChange={(event) => {
+                                      const nextStatus = event.target.value as ActionStatus;
+                                      const shouldFillActual = nextStatus === "DONE" && row.actualAmount === null;
+
                                       if (row.source === "api" && row.actionId) {
                                         updateApiRow(row.actionId, {
-                                          status: event.target.value as ActionStatus
+                                          status: nextStatus,
+                                          ...(shouldFillActual ? { actualAmount: row.plannedAmount } : {})
                                         });
                                         return;
                                       }
 
                                       if (row.source === "monthlyCustom" && row.monthlyCustomId) {
                                         updateMonthlyCustomRow(row.monthlyCustomId, {
-                                          status: event.target.value as ActionStatus
+                                          status: nextStatus,
+                                          ...(shouldFillActual ? { actualAmount: row.plannedAmount } : {})
                                         });
                                       }
                                     }}

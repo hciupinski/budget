@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type AnnualPlanResponse } from "@/lib/budget-types";
-import { CopyIcon, RefreshIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
+import { CalendarIcon, CopyIcon, RefreshIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import {
   asCurrency,
   asSignedCurrency,
@@ -17,15 +17,19 @@ import {
 } from "@/lib/section-settings";
 import { useCurrencySetting } from "@/lib/currency-settings";
 import {
+  annualApiOneTimeRowKey,
+  annualCustomOneTimeRowKey,
   createAnnualCustomDraft,
   PLANNER_CUSTOM_EVENT,
   refreshPlannerCustomizationFromApi,
   readAnnualCustomItems,
   readHiddenAnnualApiRows,
   readNameOverrides,
+  readOneTimeAnnualRowKeys,
   saveAnnualCustomItems,
   saveHiddenAnnualApiRows,
   saveNameOverrides,
+  saveOneTimeAnnualRowKeys,
   type AnnualCustomItem
 } from "@/lib/planner-custom-items";
 
@@ -44,6 +48,22 @@ type AnnualDisplayRow = {
     sectionId: string;
   };
 };
+
+function hasNonZero(value: number): boolean {
+  return Math.abs(value) > 0.000001;
+}
+
+function oneTimeKeyForAnnualRow(row: AnnualDisplayRow, year: number): string | null {
+  if (row.source === "api" && row.categoryId) {
+    return annualApiOneTimeRowKey(year, row.categoryId);
+  }
+
+  if (row.source === "custom" && row.customId) {
+    return annualCustomOneTimeRowKey(year, row.customId);
+  }
+
+  return null;
+}
 
 function fallbackLabelFromKind(kind: ManagedSectionKind): string {
   if (kind === "INCOME") {
@@ -106,7 +126,9 @@ export function AnnualPlanner() {
   const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
+  const [oneTimeAnnualRows, setOneTimeAnnualRows] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -153,6 +175,7 @@ export function AnnualPlanner() {
       setAnnualCustomItems(readAnnualCustomItems());
       setNameOverrides(readNameOverrides());
       setHiddenApiRows(readHiddenAnnualApiRows());
+      setOneTimeAnnualRows(readOneTimeAnnualRowKeys());
     }
 
     syncLocalRows();
@@ -166,6 +189,8 @@ export function AnnualPlanner() {
       window.removeEventListener("storage", syncLocalRows);
     };
   }, []);
+
+  const oneTimeAnnualRowsSet = useMemo(() => new Set(oneTimeAnnualRows), [oneTimeAnnualRows]);
 
   const rowsWithMeta = useMemo(() => {
     const rows: AnnualDisplayRow[] = [];
@@ -253,13 +278,10 @@ export function AnnualPlanner() {
     return Array.from(groupedMap.values()).sort((a, b) => a.order - b.order);
   }, [rowsWithMeta, sectionSettings]);
 
-  function updateApiCell(categoryId: string, monthIndex: number, value: string) {
+  function updateApiCell(categoryId: string, monthIndex: number, nextValue: number) {
     if (!annualPlan) {
       return;
     }
-
-    const parsed = Number.parseFloat(value);
-    const nextValue = Number.isFinite(parsed) ? parsed : 0;
 
     const nextRows = annualPlan.categories.map((row) => {
       if (row.categoryId !== categoryId) {
@@ -298,10 +320,7 @@ export function AnnualPlanner() {
     });
   }
 
-  function updateCustomCell(customId: string, monthIndex: number, value: string) {
-    const parsed = Number.parseFloat(value);
-    const nextValue = Number.isFinite(parsed) ? parsed : 0;
-
+  function updateCustomCell(customId: string, monthIndex: number, nextValue: number) {
     const next = annualCustomItems.map((item) => {
       if (item.id !== customId) {
         return item;
@@ -320,12 +339,53 @@ export function AnnualPlanner() {
     setAnnualCustomItems(saveAnnualCustomItems(next));
   }
 
+  function isOneTimeAnnualRow(row: AnnualDisplayRow): boolean {
+    const key = oneTimeKeyForAnnualRow(row, year);
+    return key ? oneTimeAnnualRowsSet.has(key) : false;
+  }
+
+  function toggleOneTimeAnnualRow(row: AnnualDisplayRow, checked: boolean) {
+    if (row.resolvedSection.kind !== "PERSONAL_EXPENSES") {
+      return;
+    }
+
+    const key = oneTimeKeyForAnnualRow(row, year);
+    if (!key) {
+      return;
+    }
+
+    if (checked) {
+      const nonZeroMonths = row.months
+        .map((monthValue, monthIndex) => ({ monthValue, monthIndex }))
+        .filter((entry) => hasNonZero(entry.monthValue));
+
+      if (nonZeroMonths.length > 1) {
+        setValidationMessage(
+          "Annual payment item can have value in only one month. Set all other months to 0 before enabling this option."
+        );
+        return;
+      }
+    }
+
+    const next = checked
+      ? Array.from(new Set([...oneTimeAnnualRows, key]))
+      : oneTimeAnnualRows.filter((item) => item !== key);
+
+    setOneTimeAnnualRows(saveOneTimeAnnualRowKeys(next));
+  }
+
   function addRow(sectionId: string, sectionKind: ManagedSectionKind) {
     const next = [...annualCustomItems, createAnnualCustomDraft(year, sectionId, sectionKind)];
     setAnnualCustomItems(saveAnnualCustomItems(next));
   }
 
   function removeRow(row: AnnualDisplayRow) {
+    const oneTimeKey = oneTimeKeyForAnnualRow(row, year);
+    if (oneTimeKey && oneTimeAnnualRowsSet.has(oneTimeKey)) {
+      const nextOneTimeRows = oneTimeAnnualRows.filter((item) => item !== oneTimeKey);
+      setOneTimeAnnualRows(saveOneTimeAnnualRowKeys(nextOneTimeRows));
+    }
+
     if (row.source === "api" && row.categoryId) {
       const next = saveHiddenAnnualApiRows([...hiddenApiRows, row.categoryId]);
       setHiddenApiRows(next);
@@ -564,7 +624,7 @@ export function AnnualPlanner() {
                     <th className="sticky left-[170px] z-40 min-w-[250px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">
                       Item
                     </th>
-                    <th className="sticky left-[420px] z-40 w-[74px] min-w-[74px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">
+                    <th className="sticky left-[420px] z-40 w-[110px] min-w-[110px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">
                       Action
                     </th>
                     {MONTH_LABELS.map((label) => (
@@ -594,7 +654,7 @@ export function AnnualPlanner() {
                               + add item
                             </button>
                           </td>
-                          <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
+                          <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
                           <td className="border-b border-[#cad0d8] px-2 py-3" colSpan={MONTH_LABELS.length} />
                         </tr>
                       ) : (
@@ -649,16 +709,35 @@ export function AnnualPlanner() {
                                 </div>
                               </td>
 
-                              <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cad0d8] bg-inherit px-2 py-3 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => removeRow(row)}
-                                  aria-label={`Remove ${row.name}`}
-                                  title="Remove row"
-                                  className="mx-auto grid h-7 w-7 place-items-center rounded-lg border border-[#f2a2b5] bg-[#fff1f4] text-[#be123c]"
-                                >
-                                  <TrashIcon size={14} />
-                                </button>
+                              <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cad0d8] bg-inherit px-2 py-3 text-center">
+                                <div className="mx-auto flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRow(row)}
+                                    aria-label={`Remove ${row.name}`}
+                                    title="Remove row"
+                                    className="grid h-7 w-7 place-items-center rounded-lg border border-[#f2a2b5] bg-[#fff1f4] text-[#be123c]"
+                                  >
+                                    <TrashIcon size={14} />
+                                  </button>
+
+                                  {row.resolvedSection.kind === "PERSONAL_EXPENSES" ? (
+                                    <button
+                                      type="button"
+                                      aria-pressed={isOneTimeAnnualRow(row)}
+                                      onClick={() => toggleOneTimeAnnualRow(row, !isOneTimeAnnualRow(row))}
+                                      aria-label={`Toggle annual payment mode for ${row.name}`}
+                                      title="Annual payment (single month)"
+                                      className={`grid h-7 w-7 place-items-center rounded-lg border ${
+                                        isOneTimeAnnualRow(row)
+                                          ? "border-[#9bd7b2] bg-[#e8f4ee] text-[#10a34a]"
+                                          : "border-[#c6cad2] bg-[#f8f9fb] text-[#76809a]"
+                                      }`}
+                                    >
+                                      <CalendarIcon size={14} />
+                                    </button>
+                                  ) : null}
+                                </div>
                               </td>
 
                               {row.months.map((monthValue, monthIndex) => (
@@ -669,13 +748,29 @@ export function AnnualPlanner() {
                                     className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
                                     value={monthValue}
                                     onChange={(event) => {
+                                      const parsed = Number.parseFloat(event.target.value);
+                                      const nextValue = Number.isFinite(parsed) ? parsed : 0;
+
+                                      if (isOneTimeAnnualRow(row) && hasNonZero(nextValue)) {
+                                        const conflictingMonthIndex = row.months.findIndex(
+                                          (otherMonthValue, index) => index !== monthIndex && hasNonZero(otherMonthValue)
+                                        );
+
+                                        if (conflictingMonthIndex >= 0) {
+                                          setValidationMessage(
+                                            `Annual payment can be planned only in one month. Clear ${MONTH_LABELS[conflictingMonthIndex]} first.`
+                                          );
+                                          return;
+                                        }
+                                      }
+
                                       if (row.source === "api" && row.categoryId) {
-                                        updateApiCell(row.categoryId, monthIndex, event.target.value);
+                                        updateApiCell(row.categoryId, monthIndex, nextValue);
                                         return;
                                       }
 
                                       if (row.source === "custom" && row.customId) {
-                                        updateCustomCell(row.customId, monthIndex, event.target.value);
+                                        updateCustomCell(row.customId, monthIndex, nextValue);
                                       }
                                     }}
                                   />
@@ -694,7 +789,7 @@ export function AnnualPlanner() {
                                 + add item
                               </button>
                             </td>
-                            <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
+                            <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
                             <td className="border-b border-[#cad0d8] px-2 py-3" colSpan={MONTH_LABELS.length} />
                           </tr>
                         </>
@@ -709,7 +804,7 @@ export function AnnualPlanner() {
                     <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base">
                       Monthly Remainder
                     </td>
-                    <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3" />
+                    <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3" />
                     {monthlyRemainders.map((monthValue, monthIndex) => (
                       <td
                         key={`monthly-remainder-${monthIndex + 1}`}
@@ -757,6 +852,24 @@ export function AnnualPlanner() {
             </div>
           </section>
         </>
+      ) : null}
+
+      {validationMessage ? (
+        <div className="fixed inset-0 z-[120] grid place-items-center bg-black/40 p-4">
+          <div className="ui-border ui-surface w-full max-w-md rounded-2xl border p-5">
+            <h3 className="ui-text-strong text-lg font-medium">Validation error</h3>
+            <p className="ui-text mt-2 text-sm">{validationMessage}</p>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setValidationMessage(null)}
+                className="ui-btn-primary inline-flex h-10 items-center rounded-xl px-4 text-sm"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

@@ -23,6 +23,7 @@ export type MonthlyCustomItem = {
   plannedAmount: number;
   actualAmount: number | null;
   status: ActionStatus;
+  annualCustomItemId?: string;
 };
 
 const ANNUAL_CUSTOM_KEY = "budget.annual-custom-items.v1";
@@ -30,6 +31,7 @@ const MONTHLY_CUSTOM_KEY = "budget.monthly-custom-items.v1";
 const NAME_OVERRIDES_KEY = "budget.item-name-overrides.v1";
 const HIDDEN_ANNUAL_API_ROWS_KEY = "budget.hidden-annual-api-rows.v1";
 const HIDDEN_MONTHLY_API_ROWS_KEY = "budget.hidden-monthly-api-rows.v1";
+const ONE_TIME_ANNUAL_ROWS_KEY = "budget.one-time-annual-rows.v1";
 const PLANNER_API_PATH = "/api/budget/settings/planner-customization";
 
 export const PLANNER_CUSTOM_EVENT = "budget-planner-custom-updated";
@@ -62,6 +64,7 @@ type PlannerCustomizationPayload = {
   nameOverrides: Record<string, string>;
   hiddenAnnualApiRows: string[];
   hiddenMonthlyApiRows: string[];
+  oneTimeAnnualRows: string[];
 };
 
 function readPlannerCustomizationPayload(): PlannerCustomizationPayload {
@@ -70,7 +73,8 @@ function readPlannerCustomizationPayload(): PlannerCustomizationPayload {
     monthlyCustomItems: readMonthlyCustomItems(),
     nameOverrides: readNameOverrides(),
     hiddenAnnualApiRows: readHiddenAnnualApiRows(),
-    hiddenMonthlyApiRows: readHiddenMonthlyApiRows()
+    hiddenMonthlyApiRows: readHiddenMonthlyApiRows(),
+    oneTimeAnnualRows: readOneTimeAnnualRowKeys()
   };
 }
 
@@ -84,6 +88,7 @@ function writePlannerCustomizationPayload(payload: PlannerCustomizationPayload) 
   window.localStorage.setItem(NAME_OVERRIDES_KEY, JSON.stringify(payload.nameOverrides));
   window.localStorage.setItem(HIDDEN_ANNUAL_API_ROWS_KEY, JSON.stringify(normalizeIdList(payload.hiddenAnnualApiRows)));
   window.localStorage.setItem(HIDDEN_MONTHLY_API_ROWS_KEY, JSON.stringify(normalizeIdList(payload.hiddenMonthlyApiRows)));
+  window.localStorage.setItem(ONE_TIME_ANNUAL_ROWS_KEY, JSON.stringify(normalizeIdList(payload.oneTimeAnnualRows)));
 }
 
 function schedulePlannerCustomizationPersist() {
@@ -152,7 +157,8 @@ export async function refreshPlannerCustomizationFromApi(): Promise<void> {
       monthlyCustomItems: normalizeMonthlyCustom(payload.monthlyCustomItems ?? []),
       nameOverrides: payload.nameOverrides ?? {},
       hiddenAnnualApiRows: normalizeIdList(payload.hiddenAnnualApiRows ?? []),
-      hiddenMonthlyApiRows: normalizeIdList(payload.hiddenMonthlyApiRows ?? [])
+      hiddenMonthlyApiRows: normalizeIdList(payload.hiddenMonthlyApiRows ?? []),
+      oneTimeAnnualRows: normalizeIdList(payload.oneTimeAnnualRows ?? [])
     });
 
     emitUpdate();
@@ -179,7 +185,8 @@ function normalizeMonthlyCustom(items: MonthlyCustomItem[]): MonthlyCustomItem[]
       name: item.name?.trim() || "New Item",
       plannedAmount: Number(item.plannedAmount ?? 0),
       actualAmount: item.actualAmount === null ? null : Number(item.actualAmount ?? 0),
-      status: item.status ?? "PLANNED"
+      status: item.status ?? "PLANNED",
+      annualCustomItemId: item.annualCustomItemId?.trim() || undefined
     }));
 }
 
@@ -304,6 +311,35 @@ export function saveHiddenMonthlyApiRows(values: string[]): string[] {
   }
 
   return normalized;
+}
+
+export function readOneTimeAnnualRowKeys(): string[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const parsed = parseJson<string[]>(window.localStorage.getItem(ONE_TIME_ANNUAL_ROWS_KEY), []);
+  return normalizeIdList(parsed);
+}
+
+export function saveOneTimeAnnualRowKeys(values: string[]): string[] {
+  const normalized = normalizeIdList(values);
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(ONE_TIME_ANNUAL_ROWS_KEY, JSON.stringify(normalized));
+    emitUpdate();
+    schedulePlannerCustomizationPersist();
+  }
+
+  return normalized;
+}
+
+export function annualApiOneTimeRowKey(year: number, categoryId: string): string {
+  return `api:${year}:${categoryId}`;
+}
+
+export function annualCustomOneTimeRowKey(year: number, customId: string): string {
+  return `custom:${year}:${customId}`;
 }
 
 export function createAnnualCustomDraft(
