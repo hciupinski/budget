@@ -128,6 +128,13 @@ function sectionFromKind(kind: ManagedSectionKind): "INCOME" | "COSTS" | "SAVING
   return "SAVINGS_INVESTMENTS";
 }
 
+function rowMatchKey(name: string, sectionId: string, sectionKind: ManagedSectionKind): string {
+  const normalizedName = name.trim().toLowerCase();
+  const normalizedSectionId = sectionId.trim().toLowerCase();
+  const fallbackSectionId = normalizedSectionId || sectionKind.toLowerCase();
+  return `${fallbackSectionId}::${sectionKind}::${normalizedName}`;
+}
+
 export function MonthlyWorkspace() {
   const now = new Date();
   const sectionSettings = useSectionSettings();
@@ -203,6 +210,13 @@ export function MonthlyWorkspace() {
 
   const rowsWithMeta = useMemo(() => {
     const rows: MonthlyDisplayRow[] = [];
+    const monthlyForCurrentPeriod = monthlyCustomItems.filter((item) => item.year === year && item.month === month);
+    const monthlyKeys = new Set(
+      monthlyForCurrentPeriod.map((item) => {
+        const resolved = resolveCustomSection(item, sectionSettings);
+        return rowMatchKey(item.name, resolved.sectionId, resolved.kind);
+      })
+    );
 
     for (const row of workspace?.actions ?? []) {
       if (hiddenApiRows.includes(row.actionId)) {
@@ -234,6 +248,10 @@ export function MonthlyWorkspace() {
 
     for (const item of annualCustomItems.filter((item) => item.year === year)) {
       const resolved = resolveCustomSection(item, sectionSettings);
+      const annualKey = rowMatchKey(item.name, resolved.sectionId, resolved.kind);
+      if (monthlyKeys.has(annualKey)) {
+        continue;
+      }
 
       rows.push({
         rowId: `annual-custom-${item.id}`,
@@ -248,7 +266,7 @@ export function MonthlyWorkspace() {
       });
     }
 
-    for (const item of monthlyCustomItems.filter((item) => item.year === year && item.month === month)) {
+    for (const item of monthlyForCurrentPeriod) {
       const resolved = resolveCustomSection(item, sectionSettings);
 
       rows.push({
@@ -346,6 +364,68 @@ export function MonthlyWorkspace() {
   function addMonthlyRow(sectionId: string, sectionKind: ManagedSectionKind) {
     const next = [...monthlyCustomItems, createMonthlyCustomDraft(year, month, sectionId, sectionKind)];
     setMonthlyCustomItems(saveMonthlyCustomItems(next));
+  }
+
+  function syncMonthlyCustomRowsFromAnnual(): { added: number; updated: number } {
+    const annualForYear = annualCustomItems.filter((item) => item.year === year);
+    if (annualForYear.length === 0) {
+      return { added: 0, updated: 0 };
+    }
+
+    const next = [...monthlyCustomItems];
+    let added = 0;
+    let updated = 0;
+
+    for (const annualItem of annualForYear) {
+      const resolvedAnnual = resolveCustomSection(annualItem, sectionSettings);
+      const annualKey = rowMatchKey(annualItem.name, resolvedAnnual.sectionId, resolvedAnnual.kind);
+      const annualPlanned = annualItem.months[month - 1] ?? 0;
+
+      const existingIndex = next.findIndex((monthlyItem) => {
+        if (monthlyItem.year !== year || monthlyItem.month !== month) {
+          return false;
+        }
+
+        const resolvedMonthly = resolveCustomSection(monthlyItem, sectionSettings);
+        const monthlyKey = rowMatchKey(monthlyItem.name, resolvedMonthly.sectionId, resolvedMonthly.kind);
+        return monthlyKey === annualKey;
+      });
+
+      if (existingIndex >= 0) {
+        const existing = next[existingIndex];
+        if (existing.plannedAmount !== annualPlanned) {
+          next[existingIndex] = {
+            ...existing,
+            plannedAmount: annualPlanned
+          };
+          updated += 1;
+        }
+
+        continue;
+      }
+
+      const draft = createMonthlyCustomDraft(
+        year,
+        month,
+        resolvedAnnual.sectionId || annualItem.sectionId,
+        resolvedAnnual.kind
+      );
+
+      next.push({
+        ...draft,
+        name: annualItem.name,
+        sectionId: resolvedAnnual.sectionId || annualItem.sectionId,
+        sectionKind: resolvedAnnual.kind,
+        plannedAmount: annualPlanned
+      });
+      added += 1;
+    }
+
+    if (added > 0 || updated > 0) {
+      setMonthlyCustomItems(saveMonthlyCustomItems(next));
+    }
+
+    return { added, updated };
   }
 
   function removeRow(row: MonthlyDisplayRow) {
@@ -448,6 +528,9 @@ export function MonthlyWorkspace() {
   }
 
   async function generateFromAnnualPlan() {
+    setSaving(true);
+    setMessage(null);
+
     const response = await fetch(`/api/budget/months/${year}/${month}/generate`, {
       method: "POST"
     });
@@ -458,11 +541,22 @@ export function MonthlyWorkspace() {
       }
 
       setMessage("Failed to copy budget from annual plan.");
+      setSaving(false);
+      return;
+    }
+
+    const mergedCustom = syncMonthlyCustomRowsFromAnnual();
+    await loadWorkspace();
+    setSaving(false);
+
+    if (mergedCustom.added > 0 || mergedCustom.updated > 0) {
+      setMessage(
+        `Copied budget from annual plan. Custom rows: ${mergedCustom.added} added, ${mergedCustom.updated} updated.`
+      );
       return;
     }
 
     setMessage("Copied budget values from annual plan.");
-    await loadWorkspace();
   }
 
   function shiftMonth(direction: -1 | 1) {
@@ -593,6 +687,7 @@ export function MonthlyWorkspace() {
             type="button"
             className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
             onClick={() => void generateFromAnnualPlan()}
+            disabled={saving || loading}
           >
             <CopyIcon size={20} />
             Copy from Annual

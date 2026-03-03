@@ -426,15 +426,16 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         ValidateYear(year);
         ValidateMonth(month);
 
-        var categories = await dbContext.Categories
-            .AsNoTracking()
-            .OrderBy(x => x.SortOrder)
-            .ToListAsync(cancellationToken);
-
         var monthlyCells = await dbContext.AnnualPlanCells
             .AsNoTracking()
             .Where(x => x.Year == year && x.Month == month)
             .ToDictionaryAsync(x => x.CategoryId, cancellationToken);
+
+        var categoryIdsFromAnnual = monthlyCells.Keys.ToArray();
+        var categories = await dbContext.Categories
+            .AsNoTracking()
+            .Where(x => categoryIdsFromAnnual.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
 
         var existingActions = await dbContext.MonthlyActions
             .Where(x => x.Year == year && x.Month == month)
@@ -444,19 +445,22 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         var created = 0;
         var updated = 0;
 
-        foreach (var category in categories)
+        foreach (var (categoryId, plannedCell) in monthlyCells)
         {
-            var plannedAmount = monthlyCells.TryGetValue(category.Id, out var plannedCell)
-                ? plannedCell.PlannedAmount
-                : 0m;
+            if (!categories.TryGetValue(categoryId, out _))
+            {
+                continue;
+            }
 
-            if (!existingActions.TryGetValue(category.Id, out var action))
+            var plannedAmount = plannedCell.PlannedAmount;
+
+            if (!existingActions.TryGetValue(categoryId, out var action))
             {
                 var createdAction = new MonthlyAction
                 {
                     Year = year,
                     Month = month,
-                    CategoryId = category.Id,
+                    CategoryId = categoryId,
                     PlannedAmount = plannedAmount,
                     ActualAmount = null,
                     Status = MonthlyActionStatus.Planned,
@@ -476,7 +480,7 @@ public sealed class BudgetService(BudgetDbContext dbContext)
                     {
                         year,
                         month,
-                        categoryId = category.Id,
+                        categoryId,
                         plannedAmount
                     })
                 });
@@ -506,7 +510,7 @@ public sealed class BudgetService(BudgetDbContext dbContext)
                 {
                     year,
                     month,
-                    categoryId = category.Id,
+                    categoryId,
                     previous,
                     current = plannedAmount
                 })
@@ -515,7 +519,7 @@ public sealed class BudgetService(BudgetDbContext dbContext)
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return new GenerateMonthlyActionsResponse(created, updated, categories.Count);
+        return new GenerateMonthlyActionsResponse(created, updated, monthlyCells.Count);
     }
 
     public async Task<MonthlyWorkspaceResponse> GetMonthlyWorkspaceAsync(
