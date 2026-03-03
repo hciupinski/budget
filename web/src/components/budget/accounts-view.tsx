@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { monthLongLabel } from "@/components/budget/budget-ui-utils";
+import { ChevronDownIcon, ChevronRightIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import type { AccountKind, AssetsOverviewResponse, BudgetAccount, InvestmentHolding } from "@/lib/budget-types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,28 @@ function asSignedCurrencyBy(value: number, currency: string): string {
   return abs;
 }
 
+type HoldingSymbolGroup = {
+  key: string;
+  symbol: string;
+  accountId: string;
+  accountName: string;
+  accountCurrency: string;
+  holdings: InvestmentHolding[];
+  units: number;
+  costBasis: number;
+  currentValue: number;
+  profitLoss: number;
+  averageCost: number;
+  effectivePrice: number;
+};
+
+type HoldingAccountGroup = {
+  accountId: string;
+  accountName: string;
+  accountCurrency: string;
+  symbols: HoldingSymbolGroup[];
+};
+
 export function AccountsView() {
   const now = new Date();
   const currency = useCurrencySetting();
@@ -88,6 +111,8 @@ export function AccountsView() {
   const [holdingAverageCost, setHoldingAverageCost] = useState<string>("0");
   const [holdingManualPrice, setHoldingManualPrice] = useState<string>("");
   const [manualPriceDrafts, setManualPriceDrafts] = useState<Record<string, string>>({});
+  const [expandedHoldingAccounts, setExpandedHoldingAccounts] = useState<Record<string, boolean>>({});
+  const [expandedHoldingSymbols, setExpandedHoldingSymbols] = useState<Record<string, boolean>>({});
 
   const [goalName, setGoalName] = useState<string>("");
   const [goalAccountId, setGoalAccountId] = useState<string>("");
@@ -514,6 +539,97 @@ export function AccountsView() {
 
     return Array.from(byCurrency.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [overview?.holdings]);
+
+  const groupedHoldings = useMemo<HoldingAccountGroup[]>(() => {
+    const accountsMap = new Map<string, HoldingAccountGroup>();
+
+    for (const holding of overview?.holdings ?? []) {
+      const accountGroup = accountsMap.get(holding.accountId) ?? {
+        accountId: holding.accountId,
+        accountName: holding.accountName,
+        accountCurrency: holding.accountCurrency,
+        symbols: []
+      };
+
+      let symbolGroup = accountGroup.symbols.find((item) => item.symbol === holding.symbol);
+      if (!symbolGroup) {
+        symbolGroup = {
+          key: `${holding.accountId}::${holding.symbol}`,
+          symbol: holding.symbol,
+          accountId: holding.accountId,
+          accountName: holding.accountName,
+          accountCurrency: holding.accountCurrency,
+          holdings: [],
+          units: 0,
+          costBasis: 0,
+          currentValue: 0,
+          profitLoss: 0,
+          averageCost: 0,
+          effectivePrice: 0
+        };
+        accountGroup.symbols.push(symbolGroup);
+      }
+
+      symbolGroup.holdings.push(holding);
+      symbolGroup.units += holding.units;
+      symbolGroup.costBasis += holding.costBasis;
+      symbolGroup.currentValue += holding.currentValue;
+      symbolGroup.profitLoss += holding.profitLoss;
+
+      accountsMap.set(holding.accountId, accountGroup);
+    }
+
+    const grouped = Array.from(accountsMap.values())
+      .map((accountGroup) => {
+        const symbols = accountGroup.symbols
+          .map((symbolGroup) => {
+            const avgCost = symbolGroup.units > 0 ? symbolGroup.costBasis / symbolGroup.units : 0;
+            const price = symbolGroup.units > 0 ? symbolGroup.currentValue / symbolGroup.units : 0;
+
+            return {
+              ...symbolGroup,
+              units: Number(symbolGroup.units.toFixed(6)),
+              costBasis: Number(symbolGroup.costBasis.toFixed(2)),
+              currentValue: Number(symbolGroup.currentValue.toFixed(2)),
+              profitLoss: Number(symbolGroup.profitLoss.toFixed(2)),
+              averageCost: Number(avgCost.toFixed(4)),
+              effectivePrice: Number(price.toFixed(4)),
+              holdings: [...symbolGroup.holdings].sort((a, b) => a.id.localeCompare(b.id))
+            };
+          })
+          .sort((a, b) => a.symbol.localeCompare(b.symbol));
+
+        return {
+          ...accountGroup,
+          symbols
+        };
+      })
+      .sort((a, b) => a.accountName.localeCompare(b.accountName));
+
+    return grouped;
+  }, [overview?.holdings]);
+
+  useEffect(() => {
+    setExpandedHoldingAccounts((current) => {
+      const next: Record<string, boolean> = {};
+      for (const accountGroup of groupedHoldings) {
+        next[accountGroup.accountId] = current[accountGroup.accountId] ?? true;
+      }
+      return next;
+    });
+  }, [groupedHoldings]);
+
+  useEffect(() => {
+    setExpandedHoldingSymbols((current) => {
+      const next: Record<string, boolean> = {};
+      for (const accountGroup of groupedHoldings) {
+        for (const symbolGroup of accountGroup.symbols) {
+          next[symbolGroup.key] = current[symbolGroup.key] ?? false;
+        }
+      }
+      return next;
+    });
+  }, [groupedHoldings]);
 
   return (
     <div className="space-y-6">
@@ -996,56 +1112,184 @@ export function AccountsView() {
               </tr>
             </thead>
             <tbody>
-              {(overview?.holdings ?? []).map((holding) => (
-                <tr key={holding.id}>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{holding.symbol}</td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{holding.accountName}</td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{holding.accountCurrency}</td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{holding.units}</td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(holding.averageCost, holding.accountCurrency)}</td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(holding.effectivePrice, holding.accountCurrency)}</td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(holding.currentValue, holding.accountCurrency)}</td>
-                  <td className={`border-b border-[#e0e4ea] px-3 py-2 text-right text-sm ${holding.profitLoss >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"}`}>
-                    {asSignedCurrencyBy(holding.profitLoss, holding.accountCurrency)}
-                  </td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        value={manualPriceDrafts[holding.id] ?? ""}
-                        onChange={(event) =>
-                          setManualPriceDrafts((current) => ({
-                            ...current,
-                            [holding.id]: event.target.value
-                          }))
-                        }
-                        className="h-9 w-28 text-right"
-                      />
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="ui-btn-secondary ui-border"
-                        onClick={() => void saveManualPrice(holding)}
-                        disabled={saving}
-                      >
-                        Save
-                      </Button>
-                    </div>
-                  </td>
-                  <td className="border-b border-[#e0e4ea] px-3 py-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="border-[#dc2626] text-[#dc2626] hover:bg-[#dc2626]/10"
-                      onClick={() => void removeHolding(holding.id)}
-                      disabled={saving}
-                    >
-                      Remove
-                    </Button>
+              {groupedHoldings.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="border-b border-[#e0e4ea] px-3 py-4 text-center text-sm text-[#6f7489]">
+                    No holdings yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                groupedHoldings.map((accountGroup) => {
+                  const accountExpanded = expandedHoldingAccounts[accountGroup.accountId] ?? true;
+
+                  return (
+                    <Fragment key={accountGroup.accountId}>
+                      <tr className="ui-surface-soft">
+                        <td colSpan={10} className="border-b border-[#d2d7df] px-2 py-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedHoldingAccounts((current) => ({
+                                ...current,
+                                [accountGroup.accountId]: !accountExpanded
+                              }))
+                            }
+                            className="ui-text-strong ui-hover-soft inline-flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm font-medium"
+                          >
+                            {accountExpanded ? <ChevronDownIcon size={16} /> : <ChevronRightIcon size={16} />}
+                            <span>{accountGroup.accountName}</span>
+                            <span className="ui-text-muted text-xs">
+                              ({accountGroup.accountCurrency}) · {accountGroup.symbols.length} symbols
+                            </span>
+                          </button>
+                        </td>
+                      </tr>
+
+                      {accountExpanded &&
+                        accountGroup.symbols.map((symbolGroup) => {
+                          const hasMultipleLots = symbolGroup.holdings.length > 1;
+                          const symbolExpanded = expandedHoldingSymbols[symbolGroup.key] ?? false;
+                          const singleHolding = hasMultipleLots ? null : symbolGroup.holdings[0];
+
+                          return (
+                            <Fragment key={symbolGroup.key}>
+                              <tr className="ui-surface">
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">
+                                  <div className="inline-flex items-center gap-2">
+                                    {hasMultipleLots ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedHoldingSymbols((current) => ({
+                                            ...current,
+                                            [symbolGroup.key]: !symbolExpanded
+                                          }))
+                                        }
+                                        className="ui-text inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-[#e9edf4]"
+                                      >
+                                        {symbolExpanded ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+                                        <span>{symbolGroup.symbol}</span>
+                                      </button>
+                                    ) : (
+                                      <span>{symbolGroup.symbol}</span>
+                                    )}
+                                    {hasMultipleLots ? <span className="ui-text-muted text-xs">{symbolGroup.holdings.length} lots</span> : null}
+                                  </div>
+                                </td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{symbolGroup.accountName}</td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{symbolGroup.accountCurrency}</td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{symbolGroup.units}</td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(symbolGroup.averageCost, symbolGroup.accountCurrency)}</td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(symbolGroup.effectivePrice, symbolGroup.accountCurrency)}</td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(symbolGroup.currentValue, symbolGroup.accountCurrency)}</td>
+                                <td
+                                  className={`border-b border-[#e0e4ea] px-3 py-2 text-right text-sm ${
+                                    symbolGroup.profitLoss >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"
+                                  }`}
+                                >
+                                  {asSignedCurrencyBy(symbolGroup.profitLoss, symbolGroup.accountCurrency)}
+                                </td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2">
+                                  {singleHolding ? (
+                                    <Input
+                                      type="number"
+                                      value={manualPriceDrafts[singleHolding.id] ?? ""}
+                                      onChange={(event) =>
+                                        setManualPriceDrafts((current) => ({
+                                          ...current,
+                                          [singleHolding.id]: event.target.value
+                                        }))
+                                      }
+                                      className="h-9 w-28 text-right"
+                                    />
+                                  ) : (
+                                    <span className="ui-text-muted text-xs">Expand to edit lots</span>
+                                  )}
+                                </td>
+                                <td className="border-b border-[#e0e4ea] px-3 py-2">
+                                  {singleHolding ? (
+                                    <div className="flex items-center gap-2">
+                                      <IconActionButton
+                                        label="Save manual price"
+                                        tone="default"
+                                        onClick={() => void saveManualPrice(singleHolding)}
+                                        disabled={saving}
+                                      >
+                                        <SaveIcon size={14} />
+                                      </IconActionButton>
+                                      <IconActionButton
+                                        label="Remove holding"
+                                        tone="danger"
+                                        onClick={() => void removeHolding(singleHolding.id)}
+                                        disabled={saving}
+                                      >
+                                        <TrashIcon size={14} />
+                                      </IconActionButton>
+                                    </div>
+                                  ) : (
+                                    <span className="ui-text-muted text-xs">Expand for row actions</span>
+                                  )}
+                                </td>
+                              </tr>
+
+                              {hasMultipleLots && symbolExpanded
+                                ? symbolGroup.holdings.map((holding, index) => (
+                                    <tr key={holding.id}>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 pl-8 text-sm text-[#1f2430]">
+                                        <span className="ui-text-muted">Lot #{index + 1}</span>
+                                      </td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{holding.accountName}</td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 text-sm text-[#1f2430]">{holding.accountCurrency}</td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{holding.units}</td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(holding.averageCost, holding.accountCurrency)}</td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(holding.effectivePrice, holding.accountCurrency)}</td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2 text-right text-sm text-[#1f2430]">{asCurrencyBy(holding.currentValue, holding.accountCurrency)}</td>
+                                      <td className={`border-b border-[#e0e4ea] px-3 py-2 text-right text-sm ${holding.profitLoss >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"}`}>
+                                        {asSignedCurrencyBy(holding.profitLoss, holding.accountCurrency)}
+                                      </td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2">
+                                        <Input
+                                          type="number"
+                                          value={manualPriceDrafts[holding.id] ?? ""}
+                                          onChange={(event) =>
+                                            setManualPriceDrafts((current) => ({
+                                              ...current,
+                                              [holding.id]: event.target.value
+                                            }))
+                                          }
+                                          className="h-9 w-28 text-right"
+                                        />
+                                      </td>
+                                      <td className="border-b border-[#e0e4ea] px-3 py-2">
+                                        <div className="flex items-center gap-2">
+                                          <IconActionButton
+                                            label="Save manual price"
+                                            tone="default"
+                                            onClick={() => void saveManualPrice(holding)}
+                                            disabled={saving}
+                                          >
+                                            <SaveIcon size={14} />
+                                          </IconActionButton>
+                                          <IconActionButton
+                                            label="Remove holding"
+                                            tone="danger"
+                                            onClick={() => void removeHolding(holding.id)}
+                                            disabled={saving}
+                                          >
+                                            <TrashIcon size={14} />
+                                          </IconActionButton>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))
+                                : null}
+                            </Fragment>
+                          );
+                        })}
+                    </Fragment>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -1126,6 +1370,39 @@ export function AccountsView() {
 
       {loading ? <p className="text-sm text-[#6b7280]">Loading...</p> : null}
     </div>
+  );
+}
+
+function IconActionButton({
+  children,
+  label,
+  tone,
+  onClick,
+  disabled
+}: {
+  children: ReactNode;
+  label: string;
+  tone: "default" | "danger";
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className={`h-8 w-8 rounded-md p-0 ${
+        tone === "danger"
+          ? "border-[#dc2626] text-[#dc2626] hover:bg-[#dc2626]/10"
+          : "ui-btn-secondary ui-border"
+      }`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </Button>
   );
 }
 
