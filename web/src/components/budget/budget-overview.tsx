@@ -162,15 +162,15 @@ export function BudgetOverview() {
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Budget Dashboard</h1>
-        <p className="text-lg md:text-xl text-[#71768b]">
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Budget Dashboard</h1>
+        <p className="text-base text-[#71768b]">
           {monthLongLabel(month)} {year} - Current Month Overview
         </p>
       </header>
 
-      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-        <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Monthly Money Flow</h2>
-        <p className="mt-2 text-base md:text-lg text-[#73788d]">Track how your business income flows through to personal finances</p>
+      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
+        <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Monthly Money Flow</h2>
+        <p className="mt-2 text-sm md:text-base text-[#73788d]">Track how your business income flows through to personal finances</p>
 
         <div className="mt-8 grid gap-3 xl:grid-cols-[1fr_auto_1fr_auto_1fr] xl:items-center">
           <FlowCard
@@ -184,7 +184,7 @@ export function BudgetOverview() {
             tone="purple"
             label="Business Expenses"
             value={monthMetrics.businessExpenses}
-            icon={<span className="text-base font-semibold">$</span>}
+            icon={<span className="text-sm font-semibold">$</span>}
           />
           <ArrowRightIcon size={30} className="mx-auto hidden text-[#6d7184] xl:block" />
           <FlowCard
@@ -217,9 +217,9 @@ export function BudgetOverview() {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {ACCOUNT_SNAPSHOT.map((account) => (
-          <div key={account.label} className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-6">
-            <p className="text-lg md:text-xl text-[#70768b]">{account.label}</p>
-            <p className="mt-2 text-2xl md:text-3xl font-medium text-[#141824]">{asCurrency(account.value)}</p>
+          <div key={account.label} className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-4">
+            <p className="text-sm md:text-base text-[#70768b]">{account.label}</p>
+            <p className="mt-1 text-xl md:text-2xl font-medium text-[#141824]">{asCurrency(account.value)}</p>
           </div>
         ))}
       </section>
@@ -245,12 +245,12 @@ function FlowCard({
   };
 
   return (
-    <div className={`rounded-[18px] border p-5 ${classes[tone]}`}>
+    <div className={`rounded-[18px] border p-4 ${classes[tone]}`}>
       <div className="flex items-center gap-3">
         <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#2d7af5] text-white">{icon}</div>
         <div>
-          <p className="text-base md:text-lg text-[#6d7287]">{label}</p>
-          <p className="text-3xl md:text-4xl font-medium text-[#121621]">{asCurrency(value)}</p>
+          <p className="text-sm text-[#6d7287]">{label}</p>
+          <p className="text-xl md:text-2xl font-medium text-[#121621]">{asCurrency(value)}</p>
         </div>
       </div>
     </div>
@@ -284,9 +284,9 @@ function DistributionCard({
     <div className={`rounded-[18px] border p-4 ${classes[tone]}`}>
       <div className="flex items-center gap-2 text-[#6d7287]">
         <span className={`grid h-6 w-6 place-items-center rounded-md text-white ${iconBg[tone]}`}>{icon}</span>
-        <span className="text-base md:text-lg">{label}</span>
+        <span className="text-sm md:text-base">{label}</span>
       </div>
-      <p className="mt-2 text-2xl md:text-3xl font-medium text-[#141824]">{asCurrency(value)}</p>
+      <p className="mt-2 text-lg md:text-xl font-medium text-[#141824]">{asCurrency(value)}</p>
     </div>
   );
 }

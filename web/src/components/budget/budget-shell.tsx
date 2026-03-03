@@ -66,20 +66,20 @@ export function BudgetShell({ children }: { children: ReactNode }) {
   return (
     <main className="min-h-screen bg-[#f3f4f6] text-[#171923]">
       <div className="mx-auto flex min-h-screen max-w-[1720px] flex-col border-x border-[#d6d9de] lg:flex-row">
-        <aside className="flex w-full flex-col border-b border-[#d6d9de] lg:w-[350px] lg:border-r lg:border-b-0">
-          <div className="relative border-b border-[#d6d9de] px-6 py-8">
+        <aside className="flex w-full flex-col border-b border-[#d6d9de] lg:w-[300px] lg:border-r lg:border-b-0">
+          <div className="relative border-b border-[#d6d9de] px-5 py-6">
             <div className="flex items-center gap-4 pt-1">
-              <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#030426] text-white">
-                <AppLogoIcon size={28} />
+              <div className="grid h-12 w-12 place-items-center rounded-xl bg-[#030426] text-white">
+                <AppLogoIcon size={24} />
               </div>
               <div>
-                <p className="text-xl md:text-2xl leading-tight font-semibold tracking-[-0.02em]">Budget Tracker</p>
-                <p className="text-sm md:text-base text-[#6f748a]">B2B Finance</p>
+                <p className="text-lg md:text-xl leading-tight font-semibold tracking-[-0.02em]">Budget Tracker</p>
+                <p className="text-sm text-[#6f748a]">B2B Finance</p>
               </div>
             </div>
           </div>
 
-          <nav className="space-y-2 px-4 py-6">
+          <nav className="space-y-1.5 px-3 py-4">
             {NAV_ITEMS.map((item) => {
               const active = isItemActive(pathname, item.aliases);
               const Icon = item.icon;
@@ -89,7 +89,7 @@ export function BudgetShell({ children }: { children: ReactNode }) {
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex h-14 items-center gap-3 rounded-2xl px-4 text-base md:text-lg transition-colors",
+                    "flex h-11 items-center gap-2.5 rounded-xl px-3 text-sm transition-colors",
                     active
                       ? "bg-[#040426] text-white"
                       : "text-[#141824] hover:bg-[#e6e8ee]"
@@ -102,8 +102,8 @@ export function BudgetShell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
-          <div className="mt-auto border-t border-[#d6d9de] px-6 py-6">
-            <div className="rounded-2xl bg-[#e9ebef] p-4 text-base md:text-lg leading-tight text-[#656a80]">
+          <div className="mt-auto border-t border-[#d6d9de] px-5 py-5">
+            <div className="rounded-xl bg-[#e9ebef] p-3 text-sm leading-tight text-[#656a80]">
               Manage your B2B finances with ease
             </div>
             <form action="/api/auth/logout" method="post" className="mt-3">
@@ -117,7 +117,7 @@ export function BudgetShell({ children }: { children: ReactNode }) {
           </div>
         </aside>
 
-        <section className="flex-1 px-4 py-6 sm:px-8 lg:px-10 lg:py-8">{children}</section>
+        <section className="flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-6">{children}</section>
       </div>
     </main>
   );

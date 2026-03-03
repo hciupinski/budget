@@ -114,8 +114,8 @@ export function SettingsView() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Settings</h1>
-        <p className="text-lg md:text-xl text-[#71768b]">Manage budget configuration and section rules</p>
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Settings</h1>
+        <p className="text-base text-[#71768b]">Manage budget configuration and section rules</p>
       </header>
 
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-4">
@@ -150,7 +150,7 @@ export function SettingsView() {
         <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Section Management</h2>
+              <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Section Management</h2>
               <p className="mt-1 text-sm md:text-base text-[#73788d]">
                 Add, edit, and remove sections. These rules are the source of truth for grouping in Annual and Monthly views.
               </p>
@@ -271,7 +271,7 @@ export function SettingsView() {
         </section>
       ) : (
         <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-          <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">General</h2>
+          <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">General</h2>
           <p className="mt-2 text-sm md:text-base text-[#73788d]">More settings tabs can be added here later.</p>
         </section>
       )}

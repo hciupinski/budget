@@ -101,8 +101,8 @@ export function TransactionsView() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Transactions</h1>
-          <p className="text-lg md:text-xl text-[#71768b]">View and manage all your transactions</p>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Transactions</h1>
+          <p className="text-base text-[#71768b]">View and manage all your transactions</p>
         </div>
 
         <button
@@ -128,9 +128,9 @@ export function TransactionsView() {
         </div>
       </section>
 
-      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-        <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Transaction History</h2>
-        <p className="mt-2 text-base md:text-lg text-[#73788d]">All your income and expenses in one place</p>
+      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
+        <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Transaction History</h2>
+        <p className="mt-2 text-sm md:text-base text-[#73788d]">All your income and expenses in one place</p>
 
         <div className="mt-6 overflow-x-auto">
           <table className="w-max min-w-full border-collapse">
@@ -147,15 +147,15 @@ export function TransactionsView() {
             <tbody>
               {filteredTransactions.map((transaction) => (
                 <tr key={transaction.id}>
-                  <td className="border-b border-[#cfd3da] px-3 py-3 text-base md:text-lg text-[#1d2230]">
+                  <td className="border-b border-[#cfd3da] px-3 py-3 text-sm md:text-base text-[#1d2230]">
                     <span className="inline-flex items-center gap-2">
                       <DateIcon size={18} className="text-[#6f7489]" />
                       {transaction.date}
                     </span>
                   </td>
-                  <td className="border-b border-[#cfd3da] px-3 py-3 text-base md:text-lg text-[#1d2230]">{transaction.description}</td>
-                  <td className="border-b border-[#cfd3da] px-3 py-3 text-base md:text-lg text-[#1d2230]">{transaction.category}</td>
-                  <td className="border-b border-[#cfd3da] px-3 py-3 text-base md:text-lg text-[#1d2230]">
+                  <td className="border-b border-[#cfd3da] px-3 py-3 text-sm md:text-base text-[#1d2230]">{transaction.description}</td>
+                  <td className="border-b border-[#cfd3da] px-3 py-3 text-sm md:text-base text-[#1d2230]">{transaction.category}</td>
+                  <td className="border-b border-[#cfd3da] px-3 py-3 text-sm md:text-base text-[#1d2230]">
                     <span className="inline-flex items-center gap-2">
                       {transaction.type === "INCOME" ? (
                         <ArrowDownLeftIcon size={18} className="text-[#10a34a]" />
@@ -166,12 +166,12 @@ export function TransactionsView() {
                     </span>
                   </td>
                   <td className="border-b border-[#cfd3da] px-3 py-3">
-                    <span className="inline-flex h-8 items-center rounded-full bg-[#040426] px-3 text-xs md:text-sm text-white">
+                    <span className="inline-flex h-7 items-center rounded-full bg-[#040426] px-3 text-xs md:text-sm text-white">
                       {transaction.status}
                     </span>
                   </td>
                   <td
-                    className={`border-b border-[#cfd3da] px-3 py-3 text-right text-lg md:text-xl ${
+                    className={`border-b border-[#cfd3da] px-3 py-3 text-right text-sm md:text-base ${
                       transaction.amount >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"
                     }`}
                   >
@@ -189,9 +189,9 @@ export function TransactionsView() {
 
 function StatCard({ label, value, valueTone }: { label: string; value: string; valueTone: string }) {
   return (
-    <div className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-6">
-      <p className="text-lg md:text-xl text-[#71768b]">{label}</p>
-      <p className={`mt-2 text-3xl md:text-4xl font-medium ${valueTone}`}>{value}</p>
+    <div className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-4">
+      <p className="text-sm md:text-base text-[#71768b]">{label}</p>
+      <p className={`mt-1 text-xl md:text-2xl font-medium ${valueTone}`}>{value}</p>
     </div>
   );
 }

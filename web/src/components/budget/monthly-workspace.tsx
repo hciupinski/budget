@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
-import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, SaveIcon } from "@/components/budget/icons";
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import {
   asCurrency,
   asSignedCurrency,
@@ -537,8 +537,8 @@ export function MonthlyWorkspace() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-4xl">Monthly Planning</h1>
-          <p className="text-lg text-[#71768b] md:text-xl">Manage your monthly budget and track payments</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-3xl">Monthly Planning</h1>
+          <p className="text-base text-[#71768b]">Manage your monthly budget and track payments</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -552,7 +552,7 @@ export function MonthlyWorkspace() {
             </button>
 
             <select
-              className="h-10 min-w-[170px] rounded-xl bg-[#e8eaee] px-3 text-lg text-[#1c202c]"
+              className="h-10 min-w-[170px] rounded-xl bg-[#e8eaee] px-3 text-sm text-[#1c202c]"
               value={month}
               onChange={(event) => setMonth(Number.parseInt(event.target.value, 10))}
             >
@@ -564,7 +564,7 @@ export function MonthlyWorkspace() {
             </select>
 
             <select
-              className="ml-2 h-10 min-w-[110px] rounded-xl bg-[#e8eaee] px-3 text-lg text-[#1c202c]"
+              className="ml-2 h-10 min-w-[110px] rounded-xl bg-[#e8eaee] px-3 text-sm text-[#1c202c]"
               value={year}
               onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
             >
@@ -643,22 +643,22 @@ export function MonthlyWorkspace() {
           </section>
 
           <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
-            <div className="border-b border-[#d5d9e0] p-6 md:p-8">
-              <h2 className="text-2xl font-medium text-[#171a24] md:text-3xl">Budget Items for {MONTH_LABELS[month - 1]} {year}</h2>
-              <p className="mt-2 text-base text-[#73788d] md:text-lg">Manage budgeted amounts, track actual spending, and update payment status</p>
+            <div className="border-b border-[#d5d9e0] p-5 md:p-6">
+              <h2 className="text-xl font-medium text-[#171a24] md:text-2xl">Budget Items for {MONTH_LABELS[month - 1]} {year}</h2>
+              <p className="mt-2 text-sm text-[#73788d] md:text-base">Manage budgeted amounts, track actual spending, and update payment status</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-max min-w-full border-collapse">
                 <thead>
                   <tr className="bg-[#eceef2]">
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Category</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Budgeted</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Actual</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Difference</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Status</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Notes</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Category</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Budgeted</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Actual</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Difference</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Status</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -666,10 +666,10 @@ export function MonthlyWorkspace() {
                     <Fragment key={group.id}>
                       {group.rows.length === 0 ? (
                         <tr key={`${group.id}-empty`} className={sectionRowTone(group.kind)}>
-                          <td className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl">
+                          <td className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base">
                             {group.label}
                           </td>
-                          <td className="border-b border-[#cad0d8] px-4 py-4" colSpan={6}>
+                          <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={6}>
                             <button
                               type="button"
                               onClick={() => addMonthlyRow(group.sectionId, group.kind)}
@@ -690,13 +690,13 @@ export function MonthlyWorkspace() {
                                 {index === 0 ? (
                                   <td
                                     rowSpan={group.rows.length + 1}
-                                    className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl"
+                                    className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
                                   >
                                     {group.label}
                                   </td>
                                 ) : null}
 
-                                <td className="border-b border-[#cad0d8] px-4 py-4 text-lg text-[#1b1f2b] md:text-xl">
+                                <td className="border-b border-[#cad0d8] px-4 py-3 text-sm text-[#1b1f2b] md:text-base">
                                   <div className="flex items-center justify-between gap-2">
                                     {editingName?.rowId === row.rowId ? (
                                       <Input
@@ -736,9 +736,11 @@ export function MonthlyWorkspace() {
                                     <button
                                       type="button"
                                       onClick={() => removeRow(row)}
-                                      className="h-7 rounded-lg border border-[#f2a2b5] bg-[#fff1f4] px-2 text-xs text-[#be123c]"
+                                      aria-label={`Remove ${row.name}`}
+                                      title="Remove row"
+                                      className="grid h-7 w-7 place-items-center rounded-lg border border-[#f2a2b5] bg-[#fff1f4] text-[#be123c]"
                                     >
-                                      remove
+                                      <TrashIcon size={14} />
                                     </button>
                                   </div>
                                 </td>
@@ -748,7 +750,7 @@ export function MonthlyWorkspace() {
                                     <Input
                                       type="number"
                                       step="0.01"
-                                      className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                      className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
                                       value={row.plannedAmount}
                                       onChange={(event) => {
                                         const parsed = Number.parseFloat(event.target.value);
@@ -758,7 +760,7 @@ export function MonthlyWorkspace() {
                                       }}
                                     />
                                   ) : (
-                                    <div className="grid h-11 min-w-[108px] place-items-center rounded-xl bg-[#eff1f4] text-sm font-medium text-[#1f2430] md:text-base">
+                                    <div className="grid h-10 min-w-[96px] place-items-center rounded-xl bg-[#eff1f4] text-sm font-medium text-[#1f2430] md:text-base">
                                       {row.plannedAmount}
                                     </div>
                                   )}
@@ -766,14 +768,14 @@ export function MonthlyWorkspace() {
 
                                 <td className="border-b border-[#cad0d8] px-3 py-3">
                                   {row.source === "annualCustom" ? (
-                                    <div className="grid h-11 min-w-[108px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
+                                    <div className="grid h-10 min-w-[96px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
                                       -
                                     </div>
                                   ) : (
                                     <Input
                                       type="number"
                                       step="0.01"
-                                      className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                      className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
                                       value={row.actualAmount ?? ""}
                                       onChange={(event) => {
                                         const parsed = Number.parseFloat(event.target.value);
@@ -793,7 +795,7 @@ export function MonthlyWorkspace() {
                                 </td>
 
                                 <td
-                                  className={`border-b border-[#cad0d8] px-3 py-3 text-center text-base md:text-lg ${
+                                  className={`border-b border-[#cad0d8] px-3 py-3 text-center text-sm md:text-base ${
                                     difference === null ? "text-[#6b7280]" : differenceTone(row.section, difference)
                                   }`}
                                 >
@@ -802,12 +804,12 @@ export function MonthlyWorkspace() {
 
                                 <td className="border-b border-[#cad0d8] px-3 py-3">
                                   {row.source === "annualCustom" ? (
-                                    <div className="grid h-11 min-w-[160px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
+                                    <div className="grid h-10 min-w-[140px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
                                       From annual
                                     </div>
                                   ) : (
                                     <select
-                                      className="h-11 min-w-[160px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm text-[#1f2430] md:text-base"
+                                      className="h-10 min-w-[140px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm text-[#1f2430] md:text-base"
                                       value={row.status}
                                       onChange={(event) => {
                                         if (row.source === "api" && row.actionId) {
@@ -843,7 +845,7 @@ export function MonthlyWorkspace() {
                                       }))
                                     }
                                     placeholder="Add notes..."
-                                    className="h-11 min-w-[180px] rounded-xl border-0 bg-[#eff1f4] text-sm text-[#6d7287] shadow-none md:text-base"
+                                    className="h-10 min-w-[160px] rounded-xl border-0 bg-[#eff1f4] text-sm text-[#6d7287] shadow-none md:text-base"
                                   />
                                 </td>
                               </tr>
@@ -870,8 +872,8 @@ export function MonthlyWorkspace() {
             </div>
           </section>
 
-          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-            <h2 className="text-2xl font-medium text-[#171a24] md:text-3xl">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
+          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
+            <h2 className="text-xl font-medium text-[#171a24] md:text-2xl">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
 
             <div className="mt-6 grid gap-8 xl:grid-cols-2">
               <SummaryColumn
@@ -912,9 +914,9 @@ function MonthlyMetricCard({
   danger?: boolean;
 }) {
   return (
-    <div className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
+    <div className={`rounded-[20px] border bg-[#f6f7f9] p-4 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
       <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
-      <p className={`mt-2 text-3xl font-medium md:text-4xl ${valueTone}`}>{asCurrency(planned)}</p>
+      <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(planned)}</p>
       <p className="mt-1 text-sm text-[#72778b] md:text-base">
         Actual: <span className={valueTone}>{asCurrency(actual)}</span>
       </p>
@@ -969,7 +971,7 @@ function SummaryLine({
   valueTone: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 text-lg md:text-xl">
+    <div className="flex items-center justify-between gap-4 text-sm md:text-base">
       <p className="text-[#6f7489]">{label}</p>
       <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>

@@ -70,13 +70,13 @@ export function AccountsView() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Account Management</h1>
-        <p className="text-lg md:text-xl text-[#71768b]">View and update your account balances</p>
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Account Management</h1>
+        <p className="text-base text-[#71768b]">View and update your account balances</p>
       </header>
 
-      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-        <p className="text-xl md:text-2xl text-[#70768b]">Total Net Worth</p>
-        <p className="text-4xl md:text-5xl font-medium text-[#141824]">{asCurrency(netWorth)}</p>
+      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
+        <p className="text-sm md:text-base text-[#70768b]">Total Net Worth</p>
+        <p className="text-2xl md:text-3xl font-medium text-[#141824]">{asCurrency(netWorth)}</p>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -87,20 +87,20 @@ export function AccountsView() {
           }
 
           return (
-            <div key={kind} className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-6">
-              <p className="inline-flex items-center gap-2 text-lg md:text-xl text-[#70768b]">
+            <div key={kind} className="rounded-[20px] border border-[#cfd3da] bg-[#f6f7f9] p-4">
+              <p className="inline-flex items-center gap-2 text-sm md:text-base text-[#70768b]">
                 <span className="text-[#7c8094]">{KIND_ICONS[kind]}</span>
                 {kind}
               </p>
-              <p className="mt-2 text-3xl md:text-4xl font-medium text-[#141824]">{asCurrency(account.balance)}</p>
+              <p className="mt-1 text-xl md:text-2xl font-medium text-[#141824]">{asCurrency(account.balance)}</p>
             </div>
           );
         })}
       </section>
 
-      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-        <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">All Accounts</h2>
-        <p className="mt-2 text-base md:text-lg text-[#73788d]">Manage and update your account balances</p>
+      <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
+        <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">All Accounts</h2>
+        <p className="mt-2 text-sm md:text-base text-[#73788d]">Manage and update your account balances</p>
 
         <div className="mt-6 grid gap-4 xl:grid-cols-2">
           {ACCOUNTS.map((account) => (
@@ -111,8 +111,8 @@ export function AccountsView() {
                     {account.icon}
                   </span>
                   <div>
-                    <h3 className="text-xl md:text-2xl text-[#1a1f2b]">{account.name}</h3>
-                    <span className="mt-1 inline-flex h-8 items-center rounded-full border border-[#ccd2db] px-3 text-xs md:text-sm text-[#1f2431]">
+                    <h3 className="text-base md:text-lg text-[#1a1f2b]">{account.name}</h3>
+                    <span className="mt-1 inline-flex h-7 items-center rounded-full border border-[#ccd2db] px-3 text-xs md:text-sm text-[#1f2431]">
                       {account.kind}
                     </span>
                   </div>
@@ -123,7 +123,7 @@ export function AccountsView() {
                 </button>
               </div>
 
-              <p className="mt-4 text-3xl md:text-4xl font-medium text-[#111827]">{asCurrency(account.balance)}</p>
+              <p className="mt-3 text-xl md:text-2xl font-medium text-[#111827]">{asCurrency(account.balance)}</p>
               <p className="text-sm md:text-base text-[#6d7287]">USD</p>
             </article>
           ))}

@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type AnnualPlanResponse } from "@/lib/budget-types";
-import { CopyIcon, RefreshIcon, SaveIcon } from "@/components/budget/icons";
+import { CopyIcon, RefreshIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import {
   asCurrency,
   asSignedCurrency,
@@ -475,13 +475,13 @@ export function AnnualPlanner() {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-4xl">Annual Budget Planning</h1>
-          <p className="text-lg text-[#71768b] md:text-xl">Plan your budget across all months</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-3xl">Annual Budget Planning</h1>
+          <p className="text-base text-[#71768b]">Plan your budget across all months</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <select
-            className="h-12 min-w-[132px] rounded-2xl border border-[#d1d5dd] bg-[#e9eaed] px-4 text-lg text-[#202532]"
+            className="h-12 min-w-[132px] rounded-2xl border border-[#d1d5dd] bg-[#e9eaed] px-4 text-sm text-[#202532]"
             value={year}
             onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
           >
@@ -536,12 +536,12 @@ export function AnnualPlanner() {
               <table className="w-max min-w-full border-collapse">
                 <thead>
                   <tr className="bg-[#eceef2]">
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Item</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Item</th>
                     {MONTH_LABELS.map((label) => (
                       <th
                         key={label}
-                        className="w-[122px] border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base"
+                        className="w-[122px] border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base"
                       >
                         {label}
                       </th>
@@ -553,10 +553,10 @@ export function AnnualPlanner() {
                     <Fragment key={group.id}>
                       {group.rows.length === 0 ? (
                         <tr key={`${group.id}-empty`} className={sectionRowTone(group.kind)}>
-                          <td className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl">
+                          <td className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base">
                             {group.label}
                           </td>
-                          <td className="border-b border-[#cad0d8] px-4 py-4" colSpan={1 + MONTH_LABELS.length}>
+                          <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={1 + MONTH_LABELS.length}>
                             <button
                               type="button"
                               onClick={() => addRow(group.sectionId, group.kind)}
@@ -573,13 +573,13 @@ export function AnnualPlanner() {
                               {index === 0 ? (
                                 <td
                                   rowSpan={group.rows.length + 1}
-                                  className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl"
+                                  className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
                                 >
                                   {group.label}
                                 </td>
                               ) : null}
 
-                              <td className="border-b border-[#cad0d8] px-4 py-4 text-lg text-[#1b1f2b] md:text-xl">
+                              <td className="border-b border-[#cad0d8] px-4 py-3 text-sm text-[#1b1f2b] md:text-base">
                                 <div className="flex items-center justify-between gap-2">
                                   {editingName?.rowId === row.rowId ? (
                                     <Input
@@ -619,9 +619,11 @@ export function AnnualPlanner() {
                                   <button
                                     type="button"
                                     onClick={() => removeRow(row)}
-                                    className="h-7 rounded-lg border border-[#f2a2b5] bg-[#fff1f4] px-2 text-xs text-[#be123c]"
+                                    aria-label={`Remove ${row.name}`}
+                                    title="Remove row"
+                                    className="grid h-7 w-7 place-items-center rounded-lg border border-[#f2a2b5] bg-[#fff1f4] text-[#be123c]"
                                   >
-                                    remove
+                                    <TrashIcon size={14} />
                                   </button>
                                 </div>
                               </td>
@@ -631,7 +633,7 @@ export function AnnualPlanner() {
                                   <Input
                                     type="number"
                                     step="0.01"
-                                    className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                    className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
                                     value={monthValue}
                                     onChange={(event) => {
                                       if (row.source === "api" && row.categoryId) {
@@ -677,10 +679,10 @@ export function AnnualPlanner() {
             <MetricCard label="REMAINDER" value={summary.remainder} valueTone="text-[#e11d48]" danger />
           </section>
 
-          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-            <h2 className="text-2xl font-medium text-[#171a24] md:text-3xl">Annual Money Flow Summary</h2>
+          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
+            <h2 className="text-xl font-medium text-[#171a24] md:text-2xl">Annual Money Flow Summary</h2>
 
-            <div className="mt-6 space-y-4 text-lg md:text-xl">
+            <div className="mt-6 space-y-4 text-sm md:text-base">
               <SummaryLine label="Total Business Income" value={summary.income} valueTone="text-[#10a34a]" />
               <SummaryLine label="- Business Expenses" value={-summary.businessCosts} valueTone="text-[#8f30ff]" />
 
@@ -717,9 +719,9 @@ function MetricCard({
   danger?: boolean;
 }) {
   return (
-    <div className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
+    <div className={`rounded-[20px] border bg-[#f6f7f9] p-4 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
       <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
-      <p className={`mt-2 text-3xl font-medium md:text-4xl ${valueTone}`}>{asCurrency(value)}</p>
+      <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(value)}</p>
     </div>
   );
 }
