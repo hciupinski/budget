@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDownLeftIcon, ArrowUpRightIcon, DateIcon, PlusIcon } from "@/components/budget/icons";
 import { asCurrency, asSignedCurrency } from "@/components/budget/budget-ui-utils";
+import { useCurrencySetting } from "@/lib/currency-settings";
 
 type TransactionType = "INCOME" | "EXPENSE";
 
@@ -74,6 +75,7 @@ const TRANSACTIONS: TransactionRecord[] = [
 ];
 
 export function TransactionsView() {
+  useCurrencySetting();
   const [filter, setFilter] = useState<"ALL" | TransactionType>("ALL");
 
   const totals = useMemo(() => {

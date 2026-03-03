@@ -15,6 +15,7 @@ import {
   monthLongLabel
 } from "@/components/budget/budget-ui-utils";
 import { resolveManagedSection, useSectionSettings } from "@/lib/section-settings";
+import { useCurrencySetting } from "@/lib/currency-settings";
 import {
   PLANNER_CUSTOM_EVENT,
   refreshPlannerCustomizationFromApi,
@@ -31,6 +32,7 @@ const ACCOUNT_SNAPSHOT = [
 
 export function BudgetOverview() {
   const now = new Date();
+  useCurrencySetting();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
   const sectionSettings = useSectionSettings();

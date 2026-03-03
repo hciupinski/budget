@@ -15,6 +15,7 @@ import {
   type ManagedSection,
   type ManagedSectionKind
 } from "@/lib/section-settings";
+import { useCurrencySetting } from "@/lib/currency-settings";
 import {
   createAnnualCustomDraft,
   PLANNER_CUSTOM_EVENT,
@@ -98,6 +99,7 @@ function resolveCustomSection(item: AnnualCustomItem, sections: ManagedSection[]
 
 export function AnnualPlanner() {
   const now = new Date();
+  useCurrencySetting();
   const sectionSettings = useSectionSettings();
   const [year, setYear] = useState<number>(now.getFullYear());
   const [annualPlan, setAnnualPlan] = useState<AnnualPlanResponse | null>(null);

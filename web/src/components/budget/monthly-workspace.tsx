@@ -16,6 +16,7 @@ import {
   type ManagedSection,
   type ManagedSectionKind
 } from "@/lib/section-settings";
+import { useCurrencySetting } from "@/lib/currency-settings";
 import {
   createMonthlyCustomDraft,
   PLANNER_CUSTOM_EVENT,
@@ -137,6 +138,7 @@ function rowMatchKey(name: string, sectionId: string, sectionKind: ManagedSectio
 
 export function MonthlyWorkspace() {
   const now = new Date();
+  useCurrencySetting();
   const sectionSettings = useSectionSettings();
   const [year, setYear] = useState<number>(now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);

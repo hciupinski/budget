@@ -90,7 +90,7 @@ export function BudgetShell({ children }: { children: ReactNode }) {
       <div className="mx-auto flex min-h-screen max-w-[1720px] flex-col border-x border-[#d6d9de] lg:flex-row">
         <aside
           className={cn(
-            "flex w-full shrink-0 flex-col border-b border-[#d6d9de] transition-[width,basis] duration-200 lg:flex-none lg:border-r lg:border-b-0",
+            "flex w-full shrink-0 flex-col border-b border-[#d6d9de] transition-[width,basis] duration-200 lg:flex-none lg:self-start lg:sticky lg:top-0 lg:h-screen lg:border-r lg:border-b-0",
             collapsed ? "lg:w-[84px] lg:basis-[84px]" : "lg:w-[300px] lg:basis-[300px]"
           )}
         >
@@ -116,7 +116,7 @@ export function BudgetShell({ children }: { children: ReactNode }) {
             </div>
           </div>
 
-          <nav className="space-y-1.5 px-3 py-4">
+          <nav className="flex-1 space-y-1.5 overflow-y-auto px-3 py-4">
             {NAV_ITEMS.map((item) => {
               const active = isItemActive(pathname, item.aliases);
               const Icon = item.icon;

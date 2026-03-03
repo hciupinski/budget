@@ -5,25 +5,14 @@ import {
   type ManagedSectionKind
 } from "@/lib/section-settings";
 import { MONTH_LABELS, type AnnualPlanResponse, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
+import { formatCurrency, formatSignedCurrency, readCurrencySetting } from "@/lib/currency-settings";
 
 export function asCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2
-  }).format(value);
+  return formatCurrency(value, readCurrencySetting());
 }
 
 export function asSignedCurrency(value: number): string {
-  if (value > 0) {
-    return `+${asCurrency(value)}`;
-  }
-
-  if (value < 0) {
-    return `-${asCurrency(Math.abs(value))}`;
-  }
-
-  return asCurrency(0);
+  return formatSignedCurrency(value, readCurrencySetting());
 }
 
 export function monthLongLabel(month: number): string {

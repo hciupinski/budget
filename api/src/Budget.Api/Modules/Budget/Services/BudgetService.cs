@@ -12,6 +12,7 @@ public sealed class BudgetService(BudgetDbContext dbContext)
 {
     private const string SectionsStateKey = "managed_sections";
     private const string PlannerCustomizationStateKey = "planner_customization";
+    private const string GeneralSettingsStateKey = "general_settings";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> ManagedSectionKinds = new(StringComparer.OrdinalIgnoreCase)
@@ -29,6 +30,13 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         "DONE",
         "PARTIAL",
         "SKIPPED"
+    };
+
+    private static readonly HashSet<string> SupportedCurrencies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PLN",
+        "USD",
+        "EUR"
     };
 
     private static readonly IReadOnlyList<ManagedSectionStateItem> DefaultManagedSections =
@@ -214,6 +222,45 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return ToPlannerCustomizationResponse(normalized);
+    }
+
+    public async Task<GeneralSettingsResponse> GetGeneralSettingsAsync(CancellationToken cancellationToken)
+    {
+        var state = await LoadUiStateAsync<GeneralSettingsState>(GeneralSettingsStateKey, cancellationToken);
+        return new GeneralSettingsResponse(NormalizeCurrencyCode(state?.Currency));
+    }
+
+    public async Task<GeneralSettingsResponse> SaveGeneralSettingsAsync(
+        UpdateGeneralSettingsRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var currency = NormalizeCurrencyCode(request.Currency);
+
+        await UpsertUiStateEntryAsync(
+            GeneralSettingsStateKey,
+            new GeneralSettingsState
+            {
+                Currency = currency
+            },
+            cancellationToken);
+
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "UiSettings",
+            EntityId = Guid.NewGuid(),
+            EventType = "GENERAL_SETTINGS_UPDATED",
+            ChangedBy = actor,
+            ChangedAt = DateTimeOffset.UtcNow,
+            Payload = JsonSerializer.Serialize(new
+            {
+                currency
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new GeneralSettingsResponse(currency);
     }
 
     public async Task<AnnualPlanResponse> GetAnnualPlanAsync(int year, CancellationToken cancellationToken)
@@ -977,6 +1024,17 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         return MonthlyStatuses.Contains(normalized) ? normalized : "PLANNED";
     }
 
+    private static string NormalizeCurrencyCode(string? currency)
+    {
+        if (string.IsNullOrWhiteSpace(currency))
+        {
+            return "PLN";
+        }
+
+        var normalized = currency.Trim().ToUpperInvariant();
+        return SupportedCurrencies.Contains(normalized) ? normalized : "PLN";
+    }
+
     private static void ValidateYear(int year)
     {
         if (year < 2000 || year > 2100)
@@ -1134,5 +1192,10 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         public decimal PlannedAmount { get; set; }
         public decimal? ActualAmount { get; set; }
         public string Status { get; set; } = "PLANNED";
+    }
+
+    private sealed class GeneralSettingsState
+    {
+        public string Currency { get; set; } = "PLN";
     }
 }

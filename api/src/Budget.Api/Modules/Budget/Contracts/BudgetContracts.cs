@@ -160,3 +160,9 @@ public sealed record UpdatePlannerCustomizationRequest(
     IReadOnlyDictionary<string, string>? NameOverrides,
     IReadOnlyList<string>? HiddenAnnualApiRows,
     IReadOnlyList<string>? HiddenMonthlyApiRows);
+
+public sealed record GeneralSettingsResponse(
+    string Currency);
+
+public sealed record UpdateGeneralSettingsRequest(
+    [property: Required] string Currency);

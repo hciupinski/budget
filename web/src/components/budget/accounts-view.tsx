@@ -1,6 +1,9 @@
+"use client";
+
 import type { ReactNode } from "react";
 import { asCurrency } from "@/components/budget/budget-ui-utils";
 import { BusinessIcon, EditIcon, HomeIcon, InvestmentIcon, SavingsIcon } from "@/components/budget/icons";
+import { currencyLabel, useCurrencySetting } from "@/lib/currency-settings";
 
 type AccountKind = "Business" | "Personal" | "Savings" | "Investment";
 
@@ -65,6 +68,7 @@ const KIND_ICONS: Record<AccountKind, ReactNode> = {
 };
 
 export function AccountsView() {
+  const currency = useCurrencySetting();
   const netWorth = ACCOUNTS.reduce((sum, account) => sum + account.balance, 0);
 
   return (
@@ -124,7 +128,7 @@ export function AccountsView() {
               </div>
 
               <p className="mt-3 text-xl md:text-2xl font-medium text-[#111827]">{asCurrency(account.balance)}</p>
-              <p className="text-sm md:text-base text-[#6d7287]">USD</p>
+              <p className="text-sm md:text-base text-[#6d7287]">{currencyLabel(currency)}</p>
             </article>
           ))}
         </div>

@@ -103,6 +103,36 @@ public static class BudgetModule
             }
         });
 
+        group.MapGet("/settings/general", async (BudgetService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.GetGeneralSettingsAsync(ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPut("/settings/general", async (
+            UpdateGeneralSettingsRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.SaveGeneralSettingsAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
         group.MapGet("/annual/{year:int}", async (int year, BudgetService service, CancellationToken ct) =>
         {
             try

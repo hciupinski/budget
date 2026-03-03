@@ -11,6 +11,14 @@ import {
   type ManagedSection,
   type ManagedSectionKind
 } from "@/lib/section-settings";
+import {
+  CURRENCY_OPTIONS,
+  DEFAULT_CURRENCY,
+  readCurrencySetting,
+  refreshCurrencySettingFromApi,
+  saveCurrencySetting,
+  type CurrencyCode
+} from "@/lib/currency-settings";
 import { PlusIcon } from "@/components/budget/icons";
 
 const KIND_OPTIONS: Array<{ value: ManagedSectionKind; label: string }> = [
@@ -40,13 +48,20 @@ function sectionCardTone(kind: ManagedSectionKind): string {
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<"SECTIONS" | "GENERAL">("SECTIONS");
   const [draftSections, setDraftSections] = useState<ManagedSection[]>([]);
+  const [draftCurrency, setDraftCurrency] = useState<CurrencyCode>(DEFAULT_CURRENCY);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftSections(readSectionSettings());
+    setDraftCurrency(readCurrencySetting());
     void refreshSectionSettingsFromApi().then((sections) => {
       if (sections) {
         setDraftSections(sections);
+      }
+    });
+    void refreshCurrencySettingFromApi().then((currency) => {
+      if (currency) {
+        setDraftCurrency(currency);
       }
     });
   }, []);
@@ -278,7 +293,34 @@ export function SettingsView() {
       ) : (
         <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
           <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">General</h2>
-          <p className="mt-2 text-sm md:text-base text-[#73788d]">More settings tabs can be added here later.</p>
+          <p className="mt-2 text-sm md:text-base text-[#73788d]">Configure global display preferences.</p>
+
+          <div className="mt-6 max-w-[420px] rounded-[18px] border border-[#cfd3da] bg-[#f8f9fb] p-4">
+            <label className="mb-2 block text-xs uppercase tracking-wide text-[#6f7489]">Currency</label>
+            <select
+              value={draftCurrency}
+              onChange={(event) => {
+                const nextCurrency = event.target.value as CurrencyCode;
+                const saved = saveCurrencySetting(nextCurrency);
+                setDraftCurrency(saved);
+                setMessage(`Currency updated to ${saved}.`);
+              }}
+              className="h-11 w-full rounded-xl border border-[#cfd3da] bg-white px-3 text-sm text-[#1f2430]"
+            >
+              {CURRENCY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-sm text-[#6f7489]">
+              Changes how amounts are displayed across the whole UI. No recalculation is applied.
+            </p>
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            {message ? <p className="text-sm text-[#5f647a]">{message}</p> : null}
+          </div>
         </section>
       )}
     </div>
