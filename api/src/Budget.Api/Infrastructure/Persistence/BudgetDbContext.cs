@@ -9,6 +9,7 @@ public sealed class BudgetDbContext(DbContextOptions<BudgetDbContext> options) :
     public DbSet<AnnualPlanCell> AnnualPlanCells => Set<AnnualPlanCell>();
     public DbSet<MonthlyAction> MonthlyActions => Set<MonthlyAction>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<BudgetUiStateEntry> UiStateEntries => Set<BudgetUiStateEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -56,6 +57,15 @@ public sealed class BudgetDbContext(DbContextOptions<BudgetDbContext> options) :
             entity.Property(x => x.ChangedBy).HasMaxLength(180).IsRequired();
             entity.Property(x => x.Payload).HasColumnType("jsonb").IsRequired();
             entity.HasIndex(x => x.ChangedAt);
+        });
+
+        modelBuilder.Entity<BudgetUiStateEntry>(entity =>
+        {
+            entity.ToTable("budget_ui_state");
+            entity.HasKey(x => x.StateKey);
+            entity.Property(x => x.StateKey).HasColumnName("state_key").HasMaxLength(80).IsRequired();
+            entity.Property(x => x.Value).HasColumnName("value").HasColumnType("jsonb").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
         });
     }
 }

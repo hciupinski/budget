@@ -17,6 +17,7 @@ import {
 import { resolveManagedSection, useSectionSettings } from "@/lib/section-settings";
 import {
   PLANNER_CUSTOM_EVENT,
+  refreshPlannerCustomizationFromApi,
   readAnnualCustomItems,
   type AnnualCustomItem
 } from "@/lib/planner-custom-items";
@@ -60,6 +61,7 @@ export function BudgetOverview() {
     }
 
     syncCustomItems();
+    void refreshPlannerCustomizationFromApi();
     window.addEventListener(PLANNER_CUSTOM_EVENT, syncCustomItems);
     window.addEventListener("storage", syncCustomItems);
 

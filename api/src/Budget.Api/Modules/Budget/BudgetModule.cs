@@ -43,6 +43,66 @@ public static class BudgetModule
             return Results.Ok(categories);
         });
 
+        group.MapGet("/settings/sections", async (BudgetService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.GetManagedSectionsAsync(ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPut("/settings/sections", async (
+            UpdateManagedSectionsRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.SaveManagedSectionsAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapGet("/settings/planner-customization", async (BudgetService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.GetPlannerCustomizationAsync(ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapPut("/settings/planner-customization", async (
+            UpdatePlannerCustomizationRequest request,
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.SavePlannerCustomizationAsync(request, CurrentUser(user), ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
         group.MapGet("/annual/{year:int}", async (int year, BudgetService service, CancellationToken ct) =>
         {
             try

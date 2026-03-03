@@ -21,6 +21,7 @@ export type ManagedSection = {
 
 const STORAGE_KEY = "budget.section-settings.v1";
 const UPDATE_EVENT = "budget-sections-updated";
+const SECTIONS_API_PATH = "/api/budget/settings/sections";
 
 const FALLBACK_BUSINESS_KEYWORDS = ["software", "office", "professional", "marketing", "accountant", "service"];
 const FALLBACK_SAVINGS_KEYWORDS = ["emergency", "savings"];
@@ -85,6 +86,38 @@ function normalizeSections(input: ManagedSection[]): ManagedSection[] {
   return normalized;
 }
 
+type SectionsApiResponse = {
+  sections?: ManagedSection[];
+};
+
+function normalizeApiSections(input: unknown): ManagedSection[] {
+  if (Array.isArray(input)) {
+    return normalizeSections(input as ManagedSection[]);
+  }
+
+  if (input && typeof input === "object" && Array.isArray((input as SectionsApiResponse).sections)) {
+    return normalizeSections((input as SectionsApiResponse).sections as ManagedSection[]);
+  }
+
+  return DEFAULT_SECTIONS;
+}
+
+async function pushSectionsToApi(next: ManagedSection[]): Promise<void> {
+  try {
+    await fetch(SECTIONS_API_PATH, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        sections: next
+      })
+    });
+  } catch {
+    // Keep local section edits even when API is temporarily unavailable.
+  }
+}
+
 export function createSectionDraft(order: number): ManagedSection {
   return {
     id: `sec-${Date.now()}-${Math.round(Math.random() * 1000)}`,
@@ -123,6 +156,7 @@ export function saveSectionSettings(next: ManagedSection[]): ManagedSection[] {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
     window.dispatchEvent(new Event(UPDATE_EVENT));
+    void pushSectionsToApi(normalized);
   }
 
   return normalized;
@@ -130,11 +164,37 @@ export function saveSectionSettings(next: ManagedSection[]): ManagedSection[] {
 
 export function resetSectionSettings(): ManagedSection[] {
   if (typeof window !== "undefined") {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_SECTIONS));
     window.dispatchEvent(new Event(UPDATE_EVENT));
+    void pushSectionsToApi(DEFAULT_SECTIONS);
   }
 
   return DEFAULT_SECTIONS;
+}
+
+export async function refreshSectionSettingsFromApi(): Promise<ManagedSection[] | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const response = await fetch(SECTIONS_API_PATH, {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as unknown;
+    const normalized = normalizeApiSections(payload);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    window.dispatchEvent(new Event(UPDATE_EVENT));
+    return normalized;
+  } catch {
+    return null;
+  }
 }
 
 export function useSectionSettings(): ManagedSection[] {
@@ -142,6 +202,7 @@ export function useSectionSettings(): ManagedSection[] {
 
   useEffect(() => {
     setSections(readSectionSettings());
+    void refreshSectionSettingsFromApi();
 
     function onUpdate() {
       setSections(readSectionSettings());

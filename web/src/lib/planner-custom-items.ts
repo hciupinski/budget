@@ -30,8 +30,13 @@ const MONTHLY_CUSTOM_KEY = "budget.monthly-custom-items.v1";
 const NAME_OVERRIDES_KEY = "budget.item-name-overrides.v1";
 const HIDDEN_ANNUAL_API_ROWS_KEY = "budget.hidden-annual-api-rows.v1";
 const HIDDEN_MONTHLY_API_ROWS_KEY = "budget.hidden-monthly-api-rows.v1";
+const PLANNER_API_PATH = "/api/budget/settings/planner-customization";
 
 export const PLANNER_CUSTOM_EVENT = "budget-planner-custom-updated";
+
+let persistTimeout: number | null = null;
+let persistInFlight = false;
+let persistQueued = false;
 
 function emitUpdate() {
   if (typeof window !== "undefined") {
@@ -48,6 +53,111 @@ function parseJson<T>(raw: string | null, fallback: T): T {
     return JSON.parse(raw) as T;
   } catch {
     return fallback;
+  }
+}
+
+type PlannerCustomizationPayload = {
+  annualCustomItems: AnnualCustomItem[];
+  monthlyCustomItems: MonthlyCustomItem[];
+  nameOverrides: Record<string, string>;
+  hiddenAnnualApiRows: string[];
+  hiddenMonthlyApiRows: string[];
+};
+
+function readPlannerCustomizationPayload(): PlannerCustomizationPayload {
+  return {
+    annualCustomItems: readAnnualCustomItems(),
+    monthlyCustomItems: readMonthlyCustomItems(),
+    nameOverrides: readNameOverrides(),
+    hiddenAnnualApiRows: readHiddenAnnualApiRows(),
+    hiddenMonthlyApiRows: readHiddenMonthlyApiRows()
+  };
+}
+
+function writePlannerCustomizationPayload(payload: PlannerCustomizationPayload) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(ANNUAL_CUSTOM_KEY, JSON.stringify(normalizeAnnualCustom(payload.annualCustomItems)));
+  window.localStorage.setItem(MONTHLY_CUSTOM_KEY, JSON.stringify(normalizeMonthlyCustom(payload.monthlyCustomItems)));
+  window.localStorage.setItem(NAME_OVERRIDES_KEY, JSON.stringify(payload.nameOverrides));
+  window.localStorage.setItem(HIDDEN_ANNUAL_API_ROWS_KEY, JSON.stringify(normalizeIdList(payload.hiddenAnnualApiRows)));
+  window.localStorage.setItem(HIDDEN_MONTHLY_API_ROWS_KEY, JSON.stringify(normalizeIdList(payload.hiddenMonthlyApiRows)));
+}
+
+function schedulePlannerCustomizationPersist() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (persistTimeout) {
+    window.clearTimeout(persistTimeout);
+  }
+
+  persistTimeout = window.setTimeout(() => {
+    void persistPlannerCustomizationNow();
+  }, 150);
+}
+
+async function persistPlannerCustomizationNow(): Promise<void> {
+  if (persistInFlight) {
+    persistQueued = true;
+    return;
+  }
+
+  persistInFlight = true;
+  persistQueued = false;
+
+  try {
+    const payload = readPlannerCustomizationPayload();
+    await fetch(PLANNER_API_PATH, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+  } catch {
+    // Keep local edits when API is unavailable.
+  } finally {
+    persistInFlight = false;
+
+    if (persistQueued) {
+      persistQueued = false;
+      void persistPlannerCustomizationNow();
+    }
+  }
+}
+
+export async function refreshPlannerCustomizationFromApi(): Promise<void> {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const response = await fetch(PLANNER_API_PATH, {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as Partial<PlannerCustomizationPayload>;
+
+    writePlannerCustomizationPayload({
+      annualCustomItems: normalizeAnnualCustom(payload.annualCustomItems ?? []),
+      monthlyCustomItems: normalizeMonthlyCustom(payload.monthlyCustomItems ?? []),
+      nameOverrides: payload.nameOverrides ?? {},
+      hiddenAnnualApiRows: normalizeIdList(payload.hiddenAnnualApiRows ?? []),
+      hiddenMonthlyApiRows: normalizeIdList(payload.hiddenMonthlyApiRows ?? [])
+    });
+
+    emitUpdate();
+  } catch {
+    // Fallback to local state.
   }
 }
 
@@ -88,6 +198,7 @@ export function saveAnnualCustomItems(items: AnnualCustomItem[]): AnnualCustomIt
   if (typeof window !== "undefined") {
     window.localStorage.setItem(ANNUAL_CUSTOM_KEY, JSON.stringify(normalized));
     emitUpdate();
+    schedulePlannerCustomizationPersist();
   }
 
   return normalized;
@@ -108,6 +219,7 @@ export function saveMonthlyCustomItems(items: MonthlyCustomItem[]): MonthlyCusto
   if (typeof window !== "undefined") {
     window.localStorage.setItem(MONTHLY_CUSTOM_KEY, JSON.stringify(normalized));
     emitUpdate();
+    schedulePlannerCustomizationPersist();
   }
 
   return normalized;
@@ -142,6 +254,7 @@ export function saveNameOverrides(next: Record<string, string>): Record<string, 
   if (typeof window !== "undefined") {
     window.localStorage.setItem(NAME_OVERRIDES_KEY, JSON.stringify(normalized));
     emitUpdate();
+    schedulePlannerCustomizationPersist();
   }
 
   return normalized;
@@ -166,6 +279,7 @@ export function saveHiddenAnnualApiRows(values: string[]): string[] {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(HIDDEN_ANNUAL_API_ROWS_KEY, JSON.stringify(normalized));
     emitUpdate();
+    schedulePlannerCustomizationPersist();
   }
 
   return normalized;
@@ -186,6 +300,7 @@ export function saveHiddenMonthlyApiRows(values: string[]): string[] {
   if (typeof window !== "undefined") {
     window.localStorage.setItem(HIDDEN_MONTHLY_API_ROWS_KEY, JSON.stringify(normalized));
     emitUpdate();
+    schedulePlannerCustomizationPersist();
   }
 
   return normalized;

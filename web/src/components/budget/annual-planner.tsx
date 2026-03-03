@@ -18,6 +18,7 @@ import {
 import {
   createAnnualCustomDraft,
   PLANNER_CUSTOM_EVENT,
+  refreshPlannerCustomizationFromApi,
   readAnnualCustomItems,
   readHiddenAnnualApiRows,
   readNameOverrides,
@@ -153,6 +154,7 @@ export function AnnualPlanner() {
     }
 
     syncLocalRows();
+    void refreshPlannerCustomizationFromApi();
 
     window.addEventListener(PLANNER_CUSTOM_EVENT, syncLocalRows);
     window.addEventListener("storage", syncLocalRows);
@@ -398,7 +400,7 @@ export function AnnualPlanner() {
 
     setAnnualPlan((await response.json()) as AnnualPlanResponse);
     setSaving(false);
-    setMessage("Annual plan saved. Custom rows are stored locally in UI settings.");
+    setMessage("Annual plan saved.");
   }
 
   async function copyFromPreviousYear() {

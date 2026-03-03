@@ -10,6 +10,71 @@ namespace Budget.Api.Modules.Budget.Services;
 
 public sealed class BudgetService(BudgetDbContext dbContext)
 {
+    private const string SectionsStateKey = "managed_sections";
+    private const string PlannerCustomizationStateKey = "planner_customization";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly HashSet<string> ManagedSectionKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "INCOME",
+        "BUSINESS_EXPENSES",
+        "PERSONAL_EXPENSES",
+        "SAVINGS",
+        "INVESTMENTS"
+    };
+
+    private static readonly HashSet<string> MonthlyStatuses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PLANNED",
+        "DONE",
+        "PARTIAL",
+        "SKIPPED"
+    };
+
+    private static readonly IReadOnlyList<ManagedSectionStateItem> DefaultManagedSections =
+    [
+        new ManagedSectionStateItem
+        {
+            Id = "sec-income",
+            Name = "Income",
+            Kind = "INCOME",
+            Keywords = ["income", "client", "consulting", "development"],
+            Order = 0
+        },
+        new ManagedSectionStateItem
+        {
+            Id = "sec-business-costs",
+            Name = "Business Expenses",
+            Kind = "BUSINESS_EXPENSES",
+            Keywords = ["software", "office", "professional", "marketing", "accountant", "tools"],
+            Order = 1
+        },
+        new ManagedSectionStateItem
+        {
+            Id = "sec-personal-costs",
+            Name = "Personal Expenses",
+            Kind = "PERSONAL_EXPENSES",
+            Keywords = ["housing", "food", "transportation", "healthcare", "utilities", "personal", "groceries"],
+            Order = 2
+        },
+        new ManagedSectionStateItem
+        {
+            Id = "sec-savings",
+            Name = "Savings",
+            Kind = "SAVINGS",
+            Keywords = ["savings", "emergency"],
+            Order = 3
+        },
+        new ManagedSectionStateItem
+        {
+            Id = "sec-investments",
+            Name = "Investments",
+            Kind = "INVESTMENTS",
+            Keywords = ["investment", "portfolio", "retirement", "401k", "stock"],
+            Order = 4
+        }
+    ];
+
     public async Task<IReadOnlyList<BudgetCategoryResponse>> GetCategoriesAsync(CancellationToken cancellationToken)
     {
         var categories = await dbContext.Categories
@@ -23,6 +88,132 @@ public sealed class BudgetService(BudgetDbContext dbContext)
             .ToListAsync(cancellationToken);
 
         return categories;
+    }
+
+    public async Task<ManagedSectionsResponse> GetManagedSectionsAsync(CancellationToken cancellationToken)
+    {
+        var state = await LoadUiStateAsync<ManagedSectionsState>(SectionsStateKey, cancellationToken);
+        var normalized = NormalizeManagedSections(state?.Sections);
+
+        return new ManagedSectionsResponse(
+            normalized.Select(x => new ManagedSectionResponse(
+                x.Id,
+                x.Name,
+                x.Kind,
+                x.Keywords,
+                x.Order)).ToArray());
+    }
+
+    public async Task<ManagedSectionsResponse> SaveManagedSectionsAsync(
+        UpdateManagedSectionsRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeManagedSections(
+            request.Sections.Select(x => new ManagedSectionStateItem
+            {
+                Id = x.Id,
+                Name = x.Name,
+                Kind = x.Kind,
+                Keywords = x.Keywords?.ToList() ?? [],
+                Order = x.Order
+            }));
+
+        await UpsertUiStateEntryAsync(
+            SectionsStateKey,
+            new ManagedSectionsState
+            {
+                Sections = normalized
+            },
+            cancellationToken);
+
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "UiSettings",
+            EntityId = Guid.NewGuid(),
+            EventType = "SECTIONS_UPDATED",
+            ChangedBy = actor,
+            ChangedAt = DateTimeOffset.UtcNow,
+            Payload = JsonSerializer.Serialize(new
+            {
+                sections = normalized.Count
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new ManagedSectionsResponse(
+            normalized.Select(x => new ManagedSectionResponse(
+                x.Id,
+                x.Name,
+                x.Kind,
+                x.Keywords,
+                x.Order)).ToArray());
+    }
+
+    public async Task<PlannerCustomizationResponse> GetPlannerCustomizationAsync(CancellationToken cancellationToken)
+    {
+        var state = await LoadUiStateAsync<PlannerCustomizationState>(PlannerCustomizationStateKey, cancellationToken);
+        var normalized = NormalizePlannerCustomization(state);
+
+        return ToPlannerCustomizationResponse(normalized);
+    }
+
+    public async Task<PlannerCustomizationResponse> SavePlannerCustomizationAsync(
+        UpdatePlannerCustomizationRequest request,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizePlannerCustomization(new PlannerCustomizationState
+        {
+            AnnualCustomItems = request.AnnualCustomItems?.Select(x => new AnnualCustomItemState
+            {
+                Id = x.Id,
+                Year = x.Year,
+                SectionId = x.SectionId,
+                SectionKind = x.SectionKind,
+                Name = x.Name,
+                Months = x.Months?.ToList() ?? []
+            }).ToList() ?? [],
+            MonthlyCustomItems = request.MonthlyCustomItems?.Select(x => new MonthlyCustomItemState
+            {
+                Id = x.Id,
+                Year = x.Year,
+                Month = x.Month,
+                SectionId = x.SectionId,
+                SectionKind = x.SectionKind,
+                Name = x.Name,
+                PlannedAmount = x.PlannedAmount,
+                ActualAmount = x.ActualAmount,
+                Status = x.Status
+            }).ToList() ?? [],
+            NameOverrides = request.NameOverrides?.ToDictionary(x => x.Key, x => x.Value) ?? [],
+            HiddenAnnualApiRows = request.HiddenAnnualApiRows?.ToList() ?? [],
+            HiddenMonthlyApiRows = request.HiddenMonthlyApiRows?.ToList() ?? []
+        });
+
+        await UpsertUiStateEntryAsync(PlannerCustomizationStateKey, normalized, cancellationToken);
+
+        dbContext.AuditEntries.Add(new AuditEntry
+        {
+            EntityType = "UiSettings",
+            EntityId = Guid.NewGuid(),
+            EventType = "PLANNER_CUSTOMIZATION_UPDATED",
+            ChangedBy = actor,
+            ChangedAt = DateTimeOffset.UtcNow,
+            Payload = JsonSerializer.Serialize(new
+            {
+                annualCustomItems = normalized.AnnualCustomItems.Count,
+                monthlyCustomItems = normalized.MonthlyCustomItems.Count,
+                nameOverrides = normalized.NameOverrides.Count,
+                hiddenAnnualApiRows = normalized.HiddenAnnualApiRows.Count,
+                hiddenMonthlyApiRows = normalized.HiddenMonthlyApiRows.Count
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToPlannerCustomizationResponse(normalized);
     }
 
     public async Task<AnnualPlanResponse> GetAnnualPlanAsync(int year, CancellationToken cancellationToken)
@@ -524,6 +715,264 @@ public sealed class BudgetService(BudgetDbContext dbContext)
         return entries;
     }
 
+    private async Task<T?> LoadUiStateAsync<T>(string stateKey, CancellationToken cancellationToken)
+    {
+        var entry = await dbContext.UiStateEntries
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.StateKey == stateKey, cancellationToken);
+
+        if (entry is null || string.IsNullOrWhiteSpace(entry.Value))
+        {
+            return default;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(entry.Value, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+    }
+
+    private async Task UpsertUiStateEntryAsync<T>(
+        string stateKey,
+        T payload,
+        CancellationToken cancellationToken)
+    {
+        var serialized = JsonSerializer.Serialize(payload, JsonOptions);
+        var now = DateTimeOffset.UtcNow;
+
+        var entry = await dbContext.UiStateEntries
+            .SingleOrDefaultAsync(x => x.StateKey == stateKey, cancellationToken);
+
+        if (entry is null)
+        {
+            dbContext.UiStateEntries.Add(new BudgetUiStateEntry
+            {
+                StateKey = stateKey,
+                Value = serialized,
+                UpdatedAt = now
+            });
+
+            return;
+        }
+
+        entry.Value = serialized;
+        entry.UpdatedAt = now;
+    }
+
+    private static PlannerCustomizationResponse ToPlannerCustomizationResponse(PlannerCustomizationState state)
+    {
+        return new PlannerCustomizationResponse(
+            state.AnnualCustomItems.Select(x => new AnnualCustomItemResponse(
+                x.Id,
+                x.Year,
+                x.SectionId,
+                x.SectionKind,
+                x.Name,
+                x.Months)).ToArray(),
+            state.MonthlyCustomItems.Select(x => new MonthlyCustomItemResponse(
+                x.Id,
+                x.Year,
+                x.Month,
+                x.SectionId,
+                x.SectionKind,
+                x.Name,
+                x.PlannedAmount,
+                x.ActualAmount,
+                x.Status)).ToArray(),
+            state.NameOverrides,
+            state.HiddenAnnualApiRows,
+            state.HiddenMonthlyApiRows);
+    }
+
+    private static List<ManagedSectionStateItem> NormalizeManagedSections(IEnumerable<ManagedSectionStateItem>? sections)
+    {
+        var result = new List<ManagedSectionStateItem>();
+        var source = sections?.ToList() ?? [];
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 0; index < source.Count; index++)
+        {
+            var input = source[index];
+            var normalizedId = string.IsNullOrWhiteSpace(input.Id)
+                ? $"sec-{index}"
+                : input.Id.Trim();
+
+            if (!seenIds.Add(normalizedId))
+            {
+                continue;
+            }
+
+            var kind = NormalizeSectionKind(input.Kind);
+            var keywords = input.Keywords
+                .Select(x => x?.Trim().ToLowerInvariant())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(x => x!)
+                .ToList();
+
+            result.Add(new ManagedSectionStateItem
+            {
+                Id = normalizedId,
+                Name = string.IsNullOrWhiteSpace(input.Name) ? "Untitled Section" : input.Name.Trim(),
+                Kind = kind,
+                Keywords = keywords,
+                Order = input.Order
+            });
+        }
+
+        if (result.Count == 0)
+        {
+            result = DefaultManagedSections.Select(x => x.Clone()).ToList();
+        }
+        else
+        {
+            result = result
+                .OrderBy(x => x.Order)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .Select((item, index) =>
+                {
+                    item.Order = index;
+                    return item;
+                })
+                .ToList();
+        }
+
+        return result;
+    }
+
+    private static PlannerCustomizationState NormalizePlannerCustomization(PlannerCustomizationState? state)
+    {
+        state ??= new PlannerCustomizationState();
+
+        var annual = new List<AnnualCustomItemState>();
+        var annualIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 0; index < state.AnnualCustomItems.Count; index++)
+        {
+            var item = state.AnnualCustomItems[index];
+            if (item.Year is < 2000 or > 2100)
+            {
+                continue;
+            }
+
+            var id = string.IsNullOrWhiteSpace(item.Id) ? $"annual-{index}" : item.Id.Trim();
+            if (!annualIds.Add(id))
+            {
+                continue;
+            }
+
+            annual.Add(new AnnualCustomItemState
+            {
+                Id = id,
+                Year = item.Year,
+                SectionId = string.IsNullOrWhiteSpace(item.SectionId) ? "sec-personal-costs" : item.SectionId.Trim(),
+                SectionKind = NormalizeSectionKind(item.SectionKind),
+                Name = string.IsNullOrWhiteSpace(item.Name) ? "New Item" : item.Name.Trim(),
+                Months = Enumerable.Range(0, 12)
+                    .Select(monthIndex => decimal.Round(
+                        item.Months.ElementAtOrDefault(monthIndex),
+                        2,
+                        MidpointRounding.AwayFromZero))
+                    .ToList()
+            });
+        }
+
+        var monthly = new List<MonthlyCustomItemState>();
+        var monthlyIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 0; index < state.MonthlyCustomItems.Count; index++)
+        {
+            var item = state.MonthlyCustomItems[index];
+            if (item.Year is < 2000 or > 2100 || item.Month is < 1 or > 12)
+            {
+                continue;
+            }
+
+            var id = string.IsNullOrWhiteSpace(item.Id) ? $"monthly-{index}" : item.Id.Trim();
+            if (!monthlyIds.Add(id))
+            {
+                continue;
+            }
+
+            monthly.Add(new MonthlyCustomItemState
+            {
+                Id = id,
+                Year = item.Year,
+                Month = item.Month,
+                SectionId = string.IsNullOrWhiteSpace(item.SectionId) ? "sec-personal-costs" : item.SectionId.Trim(),
+                SectionKind = NormalizeSectionKind(item.SectionKind),
+                Name = string.IsNullOrWhiteSpace(item.Name) ? "New Item" : item.Name.Trim(),
+                PlannedAmount = decimal.Round(item.PlannedAmount, 2, MidpointRounding.AwayFromZero),
+                ActualAmount = item.ActualAmount.HasValue
+                    ? decimal.Round(item.ActualAmount.Value, 2, MidpointRounding.AwayFromZero)
+                    : null,
+                Status = NormalizeMonthlyStatus(item.Status)
+            });
+        }
+
+        var overrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in state.NameOverrides)
+        {
+            var normalizedKey = key?.Trim();
+            var normalizedValue = value?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedKey) || string.IsNullOrWhiteSpace(normalizedValue))
+            {
+                continue;
+            }
+
+            overrides[normalizedKey] = normalizedValue;
+        }
+
+        var hiddenAnnual = state.HiddenAnnualApiRows
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(x => x!)
+            .ToList();
+
+        var hiddenMonthly = state.HiddenMonthlyApiRows
+            .Select(x => x?.Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(x => x!)
+            .ToList();
+
+        return new PlannerCustomizationState
+        {
+            AnnualCustomItems = annual,
+            MonthlyCustomItems = monthly,
+            NameOverrides = overrides,
+            HiddenAnnualApiRows = hiddenAnnual,
+            HiddenMonthlyApiRows = hiddenMonthly
+        };
+    }
+
+    private static string NormalizeSectionKind(string? kind)
+    {
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            return "PERSONAL_EXPENSES";
+        }
+
+        var normalized = kind.Trim().ToUpperInvariant();
+        return ManagedSectionKinds.Contains(normalized) ? normalized : "PERSONAL_EXPENSES";
+    }
+
+    private static string NormalizeMonthlyStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return "PLANNED";
+        }
+
+        var normalized = status.Trim().ToUpperInvariant();
+        return MonthlyStatuses.Contains(normalized) ? normalized : "PLANNED";
+    }
+
     private static void ValidateYear(int year)
     {
         if (year < 2000 || year > 2100)
@@ -623,5 +1072,63 @@ public sealed class BudgetService(BudgetDbContext dbContext)
             MonthlyActionStatus.Skipped => "SKIPPED",
             _ => status.ToString().ToUpper(CultureInfo.InvariantCulture)
         };
+    }
+
+    private sealed class ManagedSectionsState
+    {
+        public List<ManagedSectionStateItem> Sections { get; set; } = [];
+    }
+
+    private sealed class ManagedSectionStateItem
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Kind { get; set; } = "PERSONAL_EXPENSES";
+        public List<string> Keywords { get; set; } = [];
+        public int Order { get; set; }
+
+        public ManagedSectionStateItem Clone()
+        {
+            return new ManagedSectionStateItem
+            {
+                Id = Id,
+                Name = Name,
+                Kind = Kind,
+                Keywords = [.. Keywords],
+                Order = Order
+            };
+        }
+    }
+
+    private sealed class PlannerCustomizationState
+    {
+        public List<AnnualCustomItemState> AnnualCustomItems { get; set; } = [];
+        public List<MonthlyCustomItemState> MonthlyCustomItems { get; set; } = [];
+        public Dictionary<string, string> NameOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public List<string> HiddenAnnualApiRows { get; set; } = [];
+        public List<string> HiddenMonthlyApiRows { get; set; } = [];
+    }
+
+    private sealed class AnnualCustomItemState
+    {
+        public string Id { get; set; } = string.Empty;
+        public int Year { get; set; }
+        public string SectionId { get; set; } = string.Empty;
+        public string SectionKind { get; set; } = "PERSONAL_EXPENSES";
+        public string Name { get; set; } = string.Empty;
+        public List<decimal> Months { get; set; } = [];
+    }
+
+    private sealed class MonthlyCustomItemState
+    {
+        public string Id { get; set; } = string.Empty;
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public string SectionId { get; set; } = string.Empty;
+        public string SectionKind { get; set; } = "PERSONAL_EXPENSES";
+        public string Name { get; set; } = string.Empty;
+        public decimal PlannedAmount { get; set; }
+        public decimal? ActualAmount { get; set; }
+        public string Status { get; set; } = "PLANNED";
     }
 }

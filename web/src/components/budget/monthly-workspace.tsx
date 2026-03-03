@@ -19,6 +19,7 @@ import {
 import {
   createMonthlyCustomDraft,
   PLANNER_CUSTOM_EVENT,
+  refreshPlannerCustomizationFromApi,
   readAnnualCustomItems,
   readHiddenMonthlyApiRows,
   readMonthlyCustomItems,
@@ -189,6 +190,7 @@ export function MonthlyWorkspace() {
     }
 
     syncLocalRows();
+    void refreshPlannerCustomizationFromApi();
 
     window.addEventListener(PLANNER_CUSTOM_EVENT, syncLocalRows);
     window.addEventListener("storage", syncLocalRows);
@@ -441,7 +443,7 @@ export function MonthlyWorkspace() {
     }
 
     setSaving(false);
-    setMessage(`Saved ${completed} server-backed monthly items. Custom monthly rows are stored in UI only.`);
+    setMessage(`Saved ${completed} monthly items.`);
     await loadWorkspace();
   }
 

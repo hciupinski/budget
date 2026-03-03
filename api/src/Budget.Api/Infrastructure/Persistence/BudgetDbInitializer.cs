@@ -8,6 +8,7 @@ public sealed class BudgetDbInitializer(BudgetDbContext dbContext, ILogger<Budge
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+        await EnsureUiStateSchemaAsync(cancellationToken);
 
         if (await dbContext.Categories.AnyAsync(cancellationToken))
         {
@@ -31,5 +32,35 @@ public sealed class BudgetDbInitializer(BudgetDbContext dbContext, ILogger<Budge
         await dbContext.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation("Budget categories seeded: {Count}", categories.Length);
+    }
+
+    private async Task EnsureUiStateSchemaAsync(CancellationToken cancellationToken)
+    {
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS budget_ui_state (
+                state_key character varying(80) PRIMARY KEY,
+                value jsonb NOT NULL,
+                updated_at timestamp with time zone NOT NULL
+            );
+            """,
+            cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'budget_ui_state'
+                      AND column_name = 'Value'
+                ) THEN
+                    ALTER TABLE budget_ui_state RENAME COLUMN "Value" TO value;
+                END IF;
+            END $$;
+            """,
+            cancellationToken);
     }
 }

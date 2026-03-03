@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import {
   createSectionDraft,
   readSectionSettings,
+  refreshSectionSettingsFromApi,
   resetSectionSettings,
   saveSectionSettings,
   type ManagedSection,
@@ -43,6 +44,11 @@ export function SettingsView() {
 
   useEffect(() => {
     setDraftSections(readSectionSettings());
+    void refreshSectionSettingsFromApi().then((sections) => {
+      if (sections) {
+        setDraftSections(sections);
+      }
+    });
   }, []);
 
   function updateSection(sectionId: string, change: Partial<ManagedSection>) {

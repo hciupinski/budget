@@ -88,3 +88,75 @@ public sealed record AuditEntryResponse(
     string EventType,
     string ChangedBy,
     string Payload);
+
+public sealed record ManagedSectionResponse(
+    string Id,
+    string Name,
+    string Kind,
+    IReadOnlyList<string> Keywords,
+    int Order);
+
+public sealed record ManagedSectionsResponse(
+    IReadOnlyList<ManagedSectionResponse> Sections);
+
+public sealed record ManagedSectionInput(
+    [property: Required] string Id,
+    [property: Required] string Name,
+    [property: Required] string Kind,
+    IReadOnlyList<string>? Keywords,
+    int Order);
+
+public sealed record UpdateManagedSectionsRequest(
+    [property: Required] IReadOnlyList<ManagedSectionInput> Sections);
+
+public sealed record AnnualCustomItemResponse(
+    string Id,
+    int Year,
+    string SectionId,
+    string SectionKind,
+    string Name,
+    IReadOnlyList<decimal> Months);
+
+public sealed record MonthlyCustomItemResponse(
+    string Id,
+    int Year,
+    int Month,
+    string SectionId,
+    string SectionKind,
+    string Name,
+    decimal PlannedAmount,
+    decimal? ActualAmount,
+    string Status);
+
+public sealed record PlannerCustomizationResponse(
+    IReadOnlyList<AnnualCustomItemResponse> AnnualCustomItems,
+    IReadOnlyList<MonthlyCustomItemResponse> MonthlyCustomItems,
+    IReadOnlyDictionary<string, string> NameOverrides,
+    IReadOnlyList<string> HiddenAnnualApiRows,
+    IReadOnlyList<string> HiddenMonthlyApiRows);
+
+public sealed record AnnualCustomItemInput(
+    [property: Required] string Id,
+    int Year,
+    [property: Required] string SectionId,
+    [property: Required] string SectionKind,
+    [property: Required] string Name,
+    IReadOnlyList<decimal>? Months);
+
+public sealed record MonthlyCustomItemInput(
+    [property: Required] string Id,
+    int Year,
+    [property: Range(1, 12)] int Month,
+    [property: Required] string SectionId,
+    [property: Required] string SectionKind,
+    [property: Required] string Name,
+    decimal PlannedAmount,
+    decimal? ActualAmount,
+    [property: Required] string Status);
+
+public sealed record UpdatePlannerCustomizationRequest(
+    IReadOnlyList<AnnualCustomItemInput>? AnnualCustomItems,
+    IReadOnlyList<MonthlyCustomItemInput>? MonthlyCustomItems,
+    IReadOnlyDictionary<string, string>? NameOverrides,
+    IReadOnlyList<string>? HiddenAnnualApiRows,
+    IReadOnlyList<string>? HiddenMonthlyApiRows);
