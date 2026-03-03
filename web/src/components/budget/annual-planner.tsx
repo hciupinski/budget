@@ -532,16 +532,23 @@ export function AnnualPlanner() {
       {annualPlan ? (
         <>
           <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
-            <div className="overflow-x-auto">
+            <div className="max-w-full overflow-x-auto">
               <table className="w-max min-w-full border-collapse">
                 <thead>
                   <tr className="bg-[#eceef2]">
-                    <th className="border-b border-[#cdd2da] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
-                    <th className="border-b border-[#cdd2da] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Item</th>
+                    <th className="sticky left-0 z-40 min-w-[170px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">
+                      Section
+                    </th>
+                    <th className="sticky left-[170px] z-40 min-w-[250px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">
+                      Item
+                    </th>
+                    <th className="sticky left-[420px] z-40 w-[74px] min-w-[74px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">
+                      Action
+                    </th>
                     {MONTH_LABELS.map((label) => (
                       <th
                         key={label}
-                        className="w-[122px] border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base"
+                        className="w-[108px] min-w-[108px] border-b border-[#cdd2da] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base"
                       >
                         {label}
                       </th>
@@ -553,10 +560,10 @@ export function AnnualPlanner() {
                     <Fragment key={group.id}>
                       {group.rows.length === 0 ? (
                         <tr key={`${group.id}-empty`} className={sectionRowTone(group.kind)}>
-                          <td className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base">
+                          <td className="sticky left-0 z-30 min-w-[170px] border-b border-[#cad0d8] bg-inherit px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base">
                             {group.label}
                           </td>
-                          <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={1 + MONTH_LABELS.length}>
+                          <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cad0d8] bg-inherit px-4 py-3">
                             <button
                               type="button"
                               onClick={() => addRow(group.sectionId, group.kind)}
@@ -565,6 +572,8 @@ export function AnnualPlanner() {
                               + add item
                             </button>
                           </td>
+                          <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
+                          <td className="border-b border-[#cad0d8] px-2 py-3" colSpan={MONTH_LABELS.length} />
                         </tr>
                       ) : (
                         <>
@@ -573,14 +582,14 @@ export function AnnualPlanner() {
                               {index === 0 ? (
                                 <td
                                   rowSpan={group.rows.length + 1}
-                                  className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
+                                  className="sticky left-0 z-30 min-w-[170px] border-b border-[#cad0d8] bg-inherit px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
                                 >
                                   {group.label}
                                 </td>
                               ) : null}
 
-                              <td className="border-b border-[#cad0d8] px-4 py-3 text-sm text-[#1b1f2b] md:text-base">
-                                <div className="flex items-center justify-between gap-2">
+                              <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cad0d8] bg-inherit px-4 py-3 text-sm text-[#1b1f2b] md:text-base">
+                                <div className="flex items-center gap-2">
                                   {editingName?.rowId === row.rowId ? (
                                     <Input
                                       value={editingName.value}
@@ -615,17 +624,19 @@ export function AnnualPlanner() {
                                       {row.name}
                                     </button>
                                   )}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => removeRow(row)}
-                                    aria-label={`Remove ${row.name}`}
-                                    title="Remove row"
-                                    className="grid h-7 w-7 place-items-center rounded-lg border border-[#f2a2b5] bg-[#fff1f4] text-[#be123c]"
-                                  >
-                                    <TrashIcon size={14} />
-                                  </button>
                                 </div>
+                              </td>
+
+                              <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cad0d8] bg-inherit px-2 py-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => removeRow(row)}
+                                  aria-label={`Remove ${row.name}`}
+                                  title="Remove row"
+                                  className="mx-auto grid h-7 w-7 place-items-center rounded-lg border border-[#f2a2b5] bg-[#fff1f4] text-[#be123c]"
+                                >
+                                  <TrashIcon size={14} />
+                                </button>
                               </td>
 
                               {row.months.map((monthValue, monthIndex) => (
@@ -652,7 +663,7 @@ export function AnnualPlanner() {
                           ))}
 
                           <tr key={`${group.id}-add`} className={sectionRowTone(group.kind)}>
-                            <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={1 + MONTH_LABELS.length}>
+                            <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cad0d8] bg-inherit px-4 py-3">
                               <button
                                 type="button"
                                 onClick={() => addRow(group.sectionId, group.kind)}
@@ -661,6 +672,8 @@ export function AnnualPlanner() {
                                 + add item
                               </button>
                             </td>
+                            <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
+                            <td className="border-b border-[#cad0d8] px-2 py-3" colSpan={MONTH_LABELS.length} />
                           </tr>
                         </>
                       )}

@@ -12,7 +12,7 @@ public static class BudgetModule
     public static IServiceCollection AddBudgetModule(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("Default")
-            ?? "Host=localhost;Port=5432;Database=budget;Username=budget;Password=budget";
+            ?? throw new InvalidOperationException("Connection string 'Default' not found.");
 
         services.AddDbContext<BudgetDbContext>(options =>
         {
