@@ -9,6 +9,7 @@ import {
   AppLogoIcon,
   CalendarIcon,
   DashboardIcon,
+  SettingsIcon,
   TransactionsIcon
 } from "@/components/budget/icons";
 
@@ -42,6 +43,12 @@ const NAV_ITEMS = [
     label: "Accounts",
     aliases: ["/accounts"],
     icon: AccountsIcon
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    aliases: ["/settings"],
+    icon: SettingsIcon
   }
 ] as const;
 

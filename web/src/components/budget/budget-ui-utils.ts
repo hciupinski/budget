@@ -1,9 +1,10 @@
+import {
+  resolveManagedSection,
+  type ApiSection,
+  type ManagedSection,
+  type ManagedSectionKind
+} from "@/lib/section-settings";
 import { MONTH_LABELS, type AnnualPlanResponse, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
-
-export type SectionGroup = "INCOME" | "BUSINESS_EXPENSES" | "PERSONAL_EXPENSES" | "SAVINGS_INVESTMENTS";
-
-const BUSINESS_COST_KEYWORDS = ["software", "office", "professional", "marketing", "accountant", "service"];
-const SAVINGS_KEYWORDS = ["emergency", "savings"];
 
 export function asCurrency(value: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -45,131 +46,100 @@ export function monthLongLabel(month: number): string {
   return map[label] ?? label;
 }
 
-export function isBusinessCostCategory(name: string): boolean {
-  const lower = name.toLowerCase();
-  return BUSINESS_COST_KEYWORDS.some((keyword) => lower.includes(keyword));
-}
-
-export function isSavingsCategory(name: string): boolean {
-  const lower = name.toLowerCase();
-  return SAVINGS_KEYWORDS.some((keyword) => lower.includes(keyword));
-}
-
-export function getSectionGroup(section: "INCOME" | "COSTS" | "SAVINGS_INVESTMENTS", categoryName: string): SectionGroup {
-  if (section === "INCOME") {
-    return "INCOME";
-  }
-
-  if (section === "SAVINGS_INVESTMENTS") {
-    return "SAVINGS_INVESTMENTS";
-  }
-
-  return isBusinessCostCategory(categoryName) ? "BUSINESS_EXPENSES" : "PERSONAL_EXPENSES";
-}
-
-export function getSectionLabel(group: SectionGroup): string {
-  if (group === "INCOME") {
-    return "Income";
-  }
-
-  if (group === "BUSINESS_EXPENSES") {
-    return "Business Expenses";
-  }
-
-  if (group === "PERSONAL_EXPENSES") {
-    return "Personal Expenses";
-  }
-
-  return "Savings & Investments";
-}
-
-export function sectionRowTone(group: SectionGroup): string {
-  if (group === "INCOME") {
+export function sectionRowTone(kind: ManagedSectionKind): string {
+  if (kind === "INCOME") {
     return "bg-[#e8f4ee]";
   }
 
-  if (group === "BUSINESS_EXPENSES") {
+  if (kind === "BUSINESS_EXPENSES") {
     return "bg-[#efebf7]";
   }
 
-  if (group === "PERSONAL_EXPENSES") {
+  if (kind === "PERSONAL_EXPENSES") {
     return "bg-[#f5efe5]";
   }
 
   return "bg-[#e8eef7]";
 }
 
-export function splitAnnualByBusinessAndPersonal(plan: AnnualPlanResponse) {
-  const businessCosts = plan.categories
-    .filter((row) => row.section === "COSTS" && isBusinessCostCategory(row.categoryName))
-    .reduce((sum, row) => sum + row.total, 0);
-
-  const personalCosts = plan.categories
-    .filter((row) => row.section === "COSTS" && !isBusinessCostCategory(row.categoryName))
-    .reduce((sum, row) => sum + row.total, 0);
-
-  const savings = plan.categories
-    .filter((row) => row.section === "SAVINGS_INVESTMENTS" && isSavingsCategory(row.categoryName))
-    .reduce((sum, row) => sum + row.total, 0);
-
-  const investments = plan.categories
-    .filter((row) => row.section === "SAVINGS_INVESTMENTS" && !isSavingsCategory(row.categoryName))
-    .reduce((sum, row) => sum + row.total, 0);
-
-  return {
-    businessCosts,
-    personalCosts,
-    savings,
-    investments
+export function splitAnnualByBusinessAndPersonal(plan: AnnualPlanResponse, sections: ManagedSection[]) {
+  const result = {
+    businessCosts: 0,
+    personalCosts: 0,
+    savings: 0,
+    investments: 0
   };
+
+  for (const row of plan.categories) {
+    const resolved = resolveManagedSection(row.section, row.categoryName, sections);
+
+    if (resolved.kind === "BUSINESS_EXPENSES") {
+      result.businessCosts += row.total;
+      continue;
+    }
+
+    if (resolved.kind === "PERSONAL_EXPENSES") {
+      result.personalCosts += row.total;
+      continue;
+    }
+
+    if (resolved.kind === "SAVINGS") {
+      result.savings += row.total;
+      continue;
+    }
+
+    if (resolved.kind === "INVESTMENTS") {
+      result.investments += row.total;
+    }
+  }
+
+  return result;
 }
 
-export function splitMonthlyByBusinessAndPersonal(workspace: MonthlyWorkspaceResponse) {
-  const businessCostsPlanned = workspace.actions
-    .filter((action) => action.section === "COSTS" && isBusinessCostCategory(action.categoryName))
-    .reduce((sum, action) => sum + action.plannedAmount, 0);
-
-  const businessCostsActual = workspace.actions
-    .filter((action) => action.section === "COSTS" && isBusinessCostCategory(action.categoryName))
-    .reduce((sum, action) => sum + (action.actualAmount ?? 0), 0);
-
-  const personalCostsPlanned = workspace.actions
-    .filter((action) => action.section === "COSTS" && !isBusinessCostCategory(action.categoryName))
-    .reduce((sum, action) => sum + action.plannedAmount, 0);
-
-  const personalCostsActual = workspace.actions
-    .filter((action) => action.section === "COSTS" && !isBusinessCostCategory(action.categoryName))
-    .reduce((sum, action) => sum + (action.actualAmount ?? 0), 0);
-
-  const savingsPlanned = workspace.actions
-    .filter((action) => action.section === "SAVINGS_INVESTMENTS" && isSavingsCategory(action.categoryName))
-    .reduce((sum, action) => sum + action.plannedAmount, 0);
-
-  const savingsActual = workspace.actions
-    .filter((action) => action.section === "SAVINGS_INVESTMENTS" && isSavingsCategory(action.categoryName))
-    .reduce((sum, action) => sum + (action.actualAmount ?? 0), 0);
-
-  const investmentsPlanned = workspace.actions
-    .filter((action) => action.section === "SAVINGS_INVESTMENTS" && !isSavingsCategory(action.categoryName))
-    .reduce((sum, action) => sum + action.plannedAmount, 0);
-
-  const investmentsActual = workspace.actions
-    .filter((action) => action.section === "SAVINGS_INVESTMENTS" && !isSavingsCategory(action.categoryName))
-    .reduce((sum, action) => sum + (action.actualAmount ?? 0), 0);
-
-  return {
-    businessCostsPlanned,
-    businessCostsActual,
-    personalCostsPlanned,
-    personalCostsActual,
-    savingsPlanned,
-    savingsActual,
-    investmentsPlanned,
-    investmentsActual
+export function splitMonthlyByBusinessAndPersonal(workspace: MonthlyWorkspaceResponse, sections: ManagedSection[]) {
+  const result = {
+    businessCostsPlanned: 0,
+    businessCostsActual: 0,
+    personalCostsPlanned: 0,
+    personalCostsActual: 0,
+    savingsPlanned: 0,
+    savingsActual: 0,
+    investmentsPlanned: 0,
+    investmentsActual: 0
   };
+
+  for (const action of workspace.actions) {
+    const resolved = resolveManagedSection(action.section, action.categoryName, sections);
+    const actual = action.actualAmount ?? 0;
+
+    if (resolved.kind === "BUSINESS_EXPENSES") {
+      result.businessCostsPlanned += action.plannedAmount;
+      result.businessCostsActual += actual;
+      continue;
+    }
+
+    if (resolved.kind === "PERSONAL_EXPENSES") {
+      result.personalCostsPlanned += action.plannedAmount;
+      result.personalCostsActual += actual;
+      continue;
+    }
+
+    if (resolved.kind === "SAVINGS") {
+      result.savingsPlanned += action.plannedAmount;
+      result.savingsActual += actual;
+      continue;
+    }
+
+    if (resolved.kind === "INVESTMENTS") {
+      result.investmentsPlanned += action.plannedAmount;
+      result.investmentsActual += actual;
+    }
+  }
+
+  return result;
 }
 
-export function differenceTone(section: "INCOME" | "COSTS" | "SAVINGS_INVESTMENTS", difference: number): string {
+export function differenceTone(section: ApiSection, difference: number): string {
   if (difference === 0) {
     return "text-[#6b7280]";
   }

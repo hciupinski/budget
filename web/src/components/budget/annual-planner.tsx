@@ -1,24 +1,109 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type AnnualPlanResponse } from "@/lib/budget-types";
 import { CopyIcon, RefreshIcon, SaveIcon } from "@/components/budget/icons";
 import {
   asCurrency,
   asSignedCurrency,
-  getSectionGroup,
-  getSectionLabel,
-  sectionRowTone,
-  splitAnnualByBusinessAndPersonal
+  sectionRowTone
 } from "@/components/budget/budget-ui-utils";
+import {
+  resolveManagedSection,
+  useSectionSettings,
+  type ManagedSection,
+  type ManagedSectionKind
+} from "@/lib/section-settings";
+import {
+  createAnnualCustomDraft,
+  PLANNER_CUSTOM_EVENT,
+  readAnnualCustomItems,
+  readHiddenAnnualApiRows,
+  readNameOverrides,
+  saveAnnualCustomItems,
+  saveHiddenAnnualApiRows,
+  saveNameOverrides,
+  type AnnualCustomItem
+} from "@/lib/planner-custom-items";
 
-const GROUP_ORDER = ["INCOME", "BUSINESS_EXPENSES", "PERSONAL_EXPENSES", "SAVINGS_INVESTMENTS"] as const;
+type AnnualDisplayRow = {
+  rowId: string;
+  source: "api" | "custom";
+  categoryId?: string;
+  customId?: string;
+  name: string;
+  months: number[];
+  resolvedSection: {
+    id: string;
+    name: string;
+    kind: ManagedSectionKind;
+    order: number;
+    sectionId: string;
+  };
+};
+
+function fallbackLabelFromKind(kind: ManagedSectionKind): string {
+  if (kind === "INCOME") {
+    return "Income";
+  }
+
+  if (kind === "BUSINESS_EXPENSES") {
+    return "Business Expenses";
+  }
+
+  if (kind === "PERSONAL_EXPENSES") {
+    return "Personal Expenses";
+  }
+
+  if (kind === "SAVINGS") {
+    return "Savings";
+  }
+
+  return "Investments";
+}
+
+function resolveCustomSection(item: AnnualCustomItem, sections: ManagedSection[]) {
+  const byId = sections.find((section) => section.id === item.sectionId);
+  if (byId) {
+    return {
+      id: byId.id,
+      name: byId.name,
+      kind: byId.kind,
+      order: byId.order,
+      sectionId: byId.id
+    };
+  }
+
+  const byKind = sections.find((section) => section.kind === item.sectionKind);
+  if (byKind) {
+    return {
+      id: byKind.id,
+      name: byKind.name,
+      kind: byKind.kind,
+      order: byKind.order,
+      sectionId: byKind.id
+    };
+  }
+
+  return {
+    id: `fallback-${item.sectionKind}`,
+    name: fallbackLabelFromKind(item.sectionKind),
+    kind: item.sectionKind,
+    order: 999,
+    sectionId: ""
+  };
+}
 
 export function AnnualPlanner() {
   const now = new Date();
+  const sectionSettings = useSectionSettings();
   const [year, setYear] = useState<number>(now.getFullYear());
   const [annualPlan, setAnnualPlan] = useState<AnnualPlanResponse | null>(null);
+  const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
+  const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
+  const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
+  const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -60,27 +145,111 @@ export function AnnualPlanner() {
     void loadAnnualPlan(year);
   }, [loadAnnualPlan, year]);
 
+  useEffect(() => {
+    function syncLocalRows() {
+      setAnnualCustomItems(readAnnualCustomItems());
+      setNameOverrides(readNameOverrides());
+      setHiddenApiRows(readHiddenAnnualApiRows());
+    }
+
+    syncLocalRows();
+
+    window.addEventListener(PLANNER_CUSTOM_EVENT, syncLocalRows);
+    window.addEventListener("storage", syncLocalRows);
+
+    return () => {
+      window.removeEventListener(PLANNER_CUSTOM_EVENT, syncLocalRows);
+      window.removeEventListener("storage", syncLocalRows);
+    };
+  }, []);
+
   const rowsWithMeta = useMemo(() => {
-    const rows = annualPlan?.categories ?? [];
+    const rows: AnnualDisplayRow[] = [];
 
-    return rows.map((row, rowIndex) => ({
-      row,
-      rowIndex,
-      group: getSectionGroup(row.section, row.categoryName)
-    }));
-  }, [annualPlan]);
+    for (const row of annualPlan?.categories ?? []) {
+      if (hiddenApiRows.includes(row.categoryId)) {
+        continue;
+      }
 
-  const groupedRows = useMemo(
-    () =>
-      GROUP_ORDER.map((group) => ({
-        group,
-        label: getSectionLabel(group),
-        rows: rowsWithMeta.filter((row) => row.group === group)
-      })).filter((group) => group.rows.length > 0),
-    [rowsWithMeta]
-  );
+      const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+      const resolved = resolveManagedSection(row.section, displayName, sectionSettings);
 
-  function updateCell(rowIndex: number, monthIndex: number, value: string) {
+      rows.push({
+        rowId: `api-${row.categoryId}`,
+        source: "api",
+        categoryId: row.categoryId,
+        name: displayName,
+        months: row.months,
+        resolvedSection: {
+          id: resolved.id,
+          name: resolved.name,
+          kind: resolved.kind,
+          order: resolved.order,
+          sectionId: resolved.id
+        }
+      });
+    }
+
+    for (const item of annualCustomItems.filter((item) => item.year === year)) {
+      rows.push({
+        rowId: `custom-${item.id}`,
+        source: "custom",
+        customId: item.id,
+        name: item.name,
+        months: item.months,
+        resolvedSection: resolveCustomSection(item, sectionSettings)
+      });
+    }
+
+    return rows;
+  }, [annualCustomItems, annualPlan?.categories, hiddenApiRows, nameOverrides, sectionSettings, year]);
+
+  const groupedRows = useMemo(() => {
+    const groupedMap = new Map<
+      string,
+      {
+        id: string;
+        label: string;
+        kind: ManagedSectionKind;
+        order: number;
+        sectionId: string;
+        rows: AnnualDisplayRow[];
+      }
+    >();
+
+    for (const section of [...sectionSettings].sort((a, b) => a.order - b.order)) {
+      groupedMap.set(section.id, {
+        id: section.id,
+        label: section.name,
+        kind: section.kind,
+        order: section.order,
+        sectionId: section.id,
+        rows: []
+      });
+    }
+
+    for (const row of rowsWithMeta) {
+      const existing = groupedMap.get(row.resolvedSection.id);
+
+      if (existing) {
+        existing.rows.push(row);
+        continue;
+      }
+
+      groupedMap.set(row.resolvedSection.id, {
+        id: row.resolvedSection.id,
+        label: row.resolvedSection.name,
+        kind: row.resolvedSection.kind,
+        order: row.resolvedSection.order,
+        sectionId: row.resolvedSection.sectionId,
+        rows: [row]
+      });
+    }
+
+    return Array.from(groupedMap.values()).sort((a, b) => a.order - b.order);
+  }, [rowsWithMeta, sectionSettings]);
+
+  function updateApiCell(categoryId: string, monthIndex: number, value: string) {
     if (!annualPlan) {
       return;
     }
@@ -88,8 +257,8 @@ export function AnnualPlanner() {
     const parsed = Number.parseFloat(value);
     const nextValue = Number.isFinite(parsed) ? parsed : 0;
 
-    const nextRows = annualPlan.categories.map((row, currentRow) => {
-      if (currentRow !== rowIndex) {
+    const nextRows = annualPlan.categories.map((row) => {
+      if (row.categoryId !== categoryId) {
         return row;
       }
 
@@ -123,6 +292,72 @@ export function AnnualPlanner() {
         grandTotal: income + costs + savingsInvestments
       }
     });
+  }
+
+  function updateCustomCell(customId: string, monthIndex: number, value: string) {
+    const parsed = Number.parseFloat(value);
+    const nextValue = Number.isFinite(parsed) ? parsed : 0;
+
+    const next = annualCustomItems.map((item) => {
+      if (item.id !== customId) {
+        return item;
+      }
+
+      const months = item.months.map((monthValue, currentMonth) =>
+        currentMonth === monthIndex ? nextValue : monthValue
+      );
+
+      return {
+        ...item,
+        months
+      };
+    });
+
+    setAnnualCustomItems(saveAnnualCustomItems(next));
+  }
+
+  function addRow(sectionId: string, sectionKind: ManagedSectionKind) {
+    const next = [...annualCustomItems, createAnnualCustomDraft(year, sectionId, sectionKind)];
+    setAnnualCustomItems(saveAnnualCustomItems(next));
+  }
+
+  function removeRow(row: AnnualDisplayRow) {
+    if (row.source === "api" && row.categoryId) {
+      const next = saveHiddenAnnualApiRows([...hiddenApiRows, row.categoryId]);
+      setHiddenApiRows(next);
+      return;
+    }
+
+    if (row.source === "custom" && row.customId) {
+      const next = annualCustomItems.filter((item) => item.id !== row.customId);
+      setAnnualCustomItems(saveAnnualCustomItems(next));
+    }
+  }
+
+  function commitNameEdit(row: AnnualDisplayRow, value: string) {
+    const nextName = value.trim() || "Unnamed Item";
+
+    if (row.source === "api" && row.categoryId) {
+      const next = saveNameOverrides({
+        ...nameOverrides,
+        [row.categoryId]: nextName
+      });
+      setNameOverrides(next);
+      return;
+    }
+
+    if (row.source === "custom" && row.customId) {
+      const next = annualCustomItems.map((item) =>
+        item.id === row.customId
+          ? {
+              ...item,
+              name: nextName
+            }
+          : item
+      );
+
+      setAnnualCustomItems(saveAnnualCustomItems(next));
+    }
   }
 
   async function saveAnnualPlan() {
@@ -163,7 +398,7 @@ export function AnnualPlanner() {
 
     setAnnualPlan((await response.json()) as AnnualPlanResponse);
     setSaving(false);
-    setMessage("Annual plan saved.");
+    setMessage("Annual plan saved. Custom rows are stored locally in UI settings.");
   }
 
   async function copyFromPreviousYear() {
@@ -189,28 +424,59 @@ export function AnnualPlanner() {
     setMessage(`Copied annual plan from ${year - 1}.`);
   }
 
-  const splitTotals = useMemo(
-    () =>
-      annualPlan
-        ? splitAnnualByBusinessAndPersonal(annualPlan)
-        : {
-            businessCosts: 0,
-            personalCosts: 0,
-            savings: 0,
-            investments: 0
-          },
-    [annualPlan]
-  );
+  const summary = useMemo(() => {
+    let income = 0;
+    let businessCosts = 0;
+    let personalCosts = 0;
+    let savings = 0;
+    let investments = 0;
 
-  const savingsAndInvestments = splitTotals.savings + splitTotals.investments;
-  const transferToPersonal = (annualPlan?.summary.income ?? 0) - splitTotals.businessCosts;
+    for (const row of rowsWithMeta) {
+      const total = row.months.reduce((sum, monthValue) => sum + monthValue, 0);
+
+      if (row.resolvedSection.kind === "INCOME") {
+        income += total;
+      }
+
+      if (row.resolvedSection.kind === "BUSINESS_EXPENSES") {
+        businessCosts += total;
+      }
+
+      if (row.resolvedSection.kind === "PERSONAL_EXPENSES") {
+        personalCosts += total;
+      }
+
+      if (row.resolvedSection.kind === "SAVINGS") {
+        savings += total;
+      }
+
+      if (row.resolvedSection.kind === "INVESTMENTS") {
+        investments += total;
+      }
+    }
+
+    const savingsAndInvestments = savings + investments;
+    const transferToPersonal = income - businessCosts;
+    const remainder = transferToPersonal - personalCosts - savingsAndInvestments;
+
+    return {
+      income,
+      businessCosts,
+      personalCosts,
+      savings,
+      investments,
+      savingsAndInvestments,
+      transferToPersonal,
+      remainder
+    };
+  }, [rowsWithMeta]);
 
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Annual Budget Planning</h1>
-          <p className="text-lg md:text-xl text-[#71768b]">Plan your budget across all months</p>
+          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-4xl">Annual Budget Planning</h1>
+          <p className="text-lg text-[#71768b] md:text-xl">Plan your budget across all months</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -231,7 +497,7 @@ export function AnnualPlanner() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm md:text-base text-[#171b27] hover:bg-[#e9ebf0]"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
             onClick={() => void loadAnnualPlan(year)}
           >
             <RefreshIcon size={20} />
@@ -240,7 +506,7 @@ export function AnnualPlanner() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm md:text-base text-[#171b27] hover:bg-[#e9ebf0]"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
             onClick={() => void copyFromPreviousYear()}
             disabled={saving}
           >
@@ -250,7 +516,7 @@ export function AnnualPlanner() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm md:text-base text-white hover:opacity-95 disabled:opacity-60"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm text-white hover:opacity-95 disabled:opacity-60 md:text-base"
             onClick={() => void saveAnnualPlan()}
             disabled={saving || loading || !annualPlan}
           >
@@ -260,8 +526,8 @@ export function AnnualPlanner() {
         </div>
       </header>
 
-      {message ? <p className="text-sm md:text-base text-[#686e84]">{message}</p> : null}
-      {loading ? <p className="text-sm md:text-base text-[#686e84]">Loading annual plan...</p> : null}
+      {message ? <p className="text-sm text-[#686e84] md:text-base">{message}</p> : null}
+      {loading ? <p className="text-sm text-[#686e84] md:text-base">Loading annual plan...</p> : null}
 
       {annualPlan ? (
         <>
@@ -270,12 +536,12 @@ export function AnnualPlanner() {
               <table className="w-max min-w-full border-collapse">
                 <thead>
                   <tr className="bg-[#eceef2]">
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Section</th>
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Item</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Item</th>
                     {MONTH_LABELS.map((label) => (
                       <th
                         key={label}
-                        className="w-[122px] border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]"
+                        className="w-[122px] border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base"
                       >
                         {label}
                       </th>
@@ -284,32 +550,119 @@ export function AnnualPlanner() {
                 </thead>
                 <tbody>
                   {groupedRows.map((group) => (
-                    group.rows.map(({ row, rowIndex }, index) => (
-                      <tr key={row.categoryId} className={sectionRowTone(group.group)}>
-                        {index === 0 ? (
-                          <td
-                            rowSpan={group.rows.length}
-                            className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg md:text-xl text-[#1b1f2b]"
-                          >
+                    <Fragment key={group.id}>
+                      {group.rows.length === 0 ? (
+                        <tr key={`${group.id}-empty`} className={sectionRowTone(group.kind)}>
+                          <td className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl">
                             {group.label}
                           </td>
-                        ) : null}
-
-                        <td className="border-b border-[#cad0d8] px-4 py-4 text-lg md:text-xl text-[#1b1f2b]">{row.categoryName}</td>
-
-                        {row.months.map((monthValue, monthIndex) => (
-                          <td key={`${row.categoryId}-${monthIndex}`} className="border-b border-[#cad0d8] px-2 py-3">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm md:text-base font-medium text-[#1f2430] shadow-none"
-                              value={monthValue}
-                              onChange={(event) => updateCell(rowIndex, monthIndex, event.target.value)}
-                            />
+                          <td className="border-b border-[#cad0d8] px-4 py-4" colSpan={1 + MONTH_LABELS.length}>
+                            <button
+                              type="button"
+                              onClick={() => addRow(group.sectionId, group.kind)}
+                              className="h-7 rounded-lg border border-[#c6cad2] bg-[#f8f9fb] px-3 text-xs text-[#30384b]"
+                            >
+                              + add item
+                            </button>
                           </td>
-                        ))}
-                      </tr>
-                    ))
+                        </tr>
+                      ) : (
+                        <>
+                          {group.rows.map((row, index) => (
+                            <tr key={row.rowId} className={sectionRowTone(group.kind)}>
+                              {index === 0 ? (
+                                <td
+                                  rowSpan={group.rows.length + 1}
+                                  className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl"
+                                >
+                                  {group.label}
+                                </td>
+                              ) : null}
+
+                              <td className="border-b border-[#cad0d8] px-4 py-4 text-lg text-[#1b1f2b] md:text-xl">
+                                <div className="flex items-center justify-between gap-2">
+                                  {editingName?.rowId === row.rowId ? (
+                                    <Input
+                                      value={editingName.value}
+                                      onChange={(event) =>
+                                        setEditingName((current) =>
+                                          current ? { ...current, value: event.target.value } : current
+                                        )
+                                      }
+                                      autoFocus
+                                      onBlur={() => {
+                                        commitNameEdit(row, editingName.value);
+                                        setEditingName(null);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          commitNameEdit(row, editingName.value);
+                                          setEditingName(null);
+                                        }
+
+                                        if (event.key === "Escape") {
+                                          setEditingName(null);
+                                        }
+                                      }}
+                                      className="h-10 rounded-xl border-[#cfd3da] bg-[#f8f9fb]"
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingName({ rowId: row.rowId, value: row.name })}
+                                      className="text-left underline decoration-dotted underline-offset-4"
+                                    >
+                                      {row.name}
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => removeRow(row)}
+                                    className="h-7 rounded-lg border border-[#f2a2b5] bg-[#fff1f4] px-2 text-xs text-[#be123c]"
+                                  >
+                                    remove
+                                  </button>
+                                </div>
+                              </td>
+
+                              {row.months.map((monthValue, monthIndex) => (
+                                <td key={`${row.rowId}-${monthIndex}`} className="border-b border-[#cad0d8] px-2 py-3">
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                    value={monthValue}
+                                    onChange={(event) => {
+                                      if (row.source === "api" && row.categoryId) {
+                                        updateApiCell(row.categoryId, monthIndex, event.target.value);
+                                        return;
+                                      }
+
+                                      if (row.source === "custom" && row.customId) {
+                                        updateCustomCell(row.customId, monthIndex, event.target.value);
+                                      }
+                                    }}
+                                  />
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+
+                          <tr key={`${group.id}-add`} className={sectionRowTone(group.kind)}>
+                            <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={1 + MONTH_LABELS.length}>
+                              <button
+                                type="button"
+                                onClick={() => addRow(group.sectionId, group.kind)}
+                                className="h-7 rounded-lg border border-[#c6cad2] bg-[#f8f9fb] px-3 text-xs text-[#30384b]"
+                              >
+                                + add item
+                              </button>
+                            </td>
+                          </tr>
+                        </>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -317,46 +670,33 @@ export function AnnualPlanner() {
           </section>
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="INCOME" value={annualPlan.summary.income} valueTone="text-[#10a34a]" />
-            <MetricCard label="BUSINESS COSTS" value={splitTotals.businessCosts} valueTone="text-[#8f30ff]" />
-            <MetricCard label="PERSONAL COSTS" value={splitTotals.personalCosts} valueTone="text-[#f35b00]" />
-            <MetricCard label="SAVINGS / INVEST" value={savingsAndInvestments} valueTone="text-[#2563eb]" />
-            <MetricCard
-              label="REMAINDER"
-              value={annualPlan.summary.remainder}
-              valueTone="text-[#e11d48]"
-              danger
-            />
+            <MetricCard label="INCOME" value={summary.income} valueTone="text-[#10a34a]" />
+            <MetricCard label="BUSINESS COSTS" value={summary.businessCosts} valueTone="text-[#8f30ff]" />
+            <MetricCard label="PERSONAL COSTS" value={summary.personalCosts} valueTone="text-[#f35b00]" />
+            <MetricCard label="SAVINGS / INVEST" value={summary.savingsAndInvestments} valueTone="text-[#2563eb]" />
+            <MetricCard label="REMAINDER" value={summary.remainder} valueTone="text-[#e11d48]" danger />
           </section>
 
           <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-            <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Annual Money Flow Summary</h2>
+            <h2 className="text-2xl font-medium text-[#171a24] md:text-3xl">Annual Money Flow Summary</h2>
 
             <div className="mt-6 space-y-4 text-lg md:text-xl">
-              <SummaryLine label="Total Business Income" value={annualPlan.summary.income} valueTone="text-[#10a34a]" />
-              <SummaryLine
-                label="- Business Expenses"
-                value={-splitTotals.businessCosts}
-                valueTone="text-[#8f30ff]"
-              />
+              <SummaryLine label="Total Business Income" value={summary.income} valueTone="text-[#10a34a]" />
+              <SummaryLine label="- Business Expenses" value={-summary.businessCosts} valueTone="text-[#8f30ff]" />
 
               <div className="border-t border-[#d7dbe2]" />
 
-              <SummaryLine label="Transfer to Personal" value={transferToPersonal} valueTone="text-[#10a34a]" />
-              <SummaryLine
-                label="- Personal Expenses"
-                value={-splitTotals.personalCosts}
-                valueTone="text-[#f35b00]"
-              />
+              <SummaryLine label="Transfer to Personal" value={summary.transferToPersonal} valueTone="text-[#10a34a]" />
+              <SummaryLine label="- Personal Expenses" value={-summary.personalCosts} valueTone="text-[#f35b00]" />
               <SummaryLine
                 label="- Savings"
-                value={-savingsAndInvestments}
+                value={-summary.savingsAndInvestments}
                 valueTone="text-[#2563eb]"
               />
 
               <div className="border-t border-[#d7dbe2]" />
 
-              <SummaryLine label="Remainder (Unallocated)" value={annualPlan.summary.remainder} valueTone="text-[#e11d48]" />
+              <SummaryLine label="Remainder (Unallocated)" value={summary.remainder} valueTone="text-[#e11d48]" />
             </div>
           </section>
         </>
@@ -377,11 +717,9 @@ function MetricCard({
   danger?: boolean;
 }) {
   return (
-    <div
-      className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}
-    >
-      <p className="text-sm md:text-base tracking-wide text-[#72778b]">{label}</p>
-      <p className={`mt-2 text-3xl md:text-4xl font-medium ${valueTone}`}>{asCurrency(value)}</p>
+    <div className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
+      <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
+      <p className={`mt-2 text-3xl font-medium md:text-4xl ${valueTone}`}>{asCurrency(value)}</p>
     </div>
   );
 }

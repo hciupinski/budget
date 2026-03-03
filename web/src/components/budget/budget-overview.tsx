@@ -12,10 +12,14 @@ import {
 } from "@/components/budget/icons";
 import {
   asCurrency,
-  getSectionGroup,
-  isSavingsCategory,
   monthLongLabel
 } from "@/components/budget/budget-ui-utils";
+import { resolveManagedSection, useSectionSettings } from "@/lib/section-settings";
+import {
+  PLANNER_CUSTOM_EVENT,
+  readAnnualCustomItems,
+  type AnnualCustomItem
+} from "@/lib/planner-custom-items";
 
 const ACCOUNT_SNAPSHOT = [
   { label: "Business Account", value: 15420.5 },
@@ -28,7 +32,9 @@ export function BudgetOverview() {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
+  const sectionSettings = useSectionSettings();
   const [annualPlan, setAnnualPlan] = useState<AnnualPlanResponse | null>(null);
+  const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
 
   const loadAnnualPlan = useCallback(async (selectedYear: number) => {
     const response = await fetch(`/api/budget/annual/${selectedYear}`, {
@@ -48,6 +54,21 @@ export function BudgetOverview() {
     void loadAnnualPlan(year);
   }, [loadAnnualPlan, year]);
 
+  useEffect(() => {
+    function syncCustomItems() {
+      setAnnualCustomItems(readAnnualCustomItems());
+    }
+
+    syncCustomItems();
+    window.addEventListener(PLANNER_CUSTOM_EVENT, syncCustomItems);
+    window.addEventListener("storage", syncCustomItems);
+
+    return () => {
+      window.removeEventListener(PLANNER_CUSTOM_EVENT, syncCustomItems);
+      window.removeEventListener("storage", syncCustomItems);
+    };
+  }, []);
+
   const monthMetrics = useMemo(() => {
     if (!annualPlan) {
       return {
@@ -64,34 +85,79 @@ export function BudgetOverview() {
     const monthIndex = month - 1;
 
     const businessIncome = rows
-      .filter((row) => row.section === "INCOME")
+      .filter((row) => resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "INCOME")
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
     const businessExpenses = rows
-      .filter((row) => getSectionGroup(row.section, row.categoryName) === "BUSINESS_EXPENSES")
+      .filter((row) =>
+        resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "BUSINESS_EXPENSES"
+      )
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
     const personalExpenses = rows
-      .filter((row) => getSectionGroup(row.section, row.categoryName) === "PERSONAL_EXPENSES")
+      .filter((row) =>
+        resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "PERSONAL_EXPENSES"
+      )
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
     const savings = rows
-      .filter((row) => row.section === "SAVINGS_INVESTMENTS" && isSavingsCategory(row.categoryName))
+      .filter((row) => resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "SAVINGS")
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
     const investments = rows
-      .filter((row) => row.section === "SAVINGS_INVESTMENTS" && !isSavingsCategory(row.categoryName))
+      .filter((row) => resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "INVESTMENTS")
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
+    const customRows = annualCustomItems.filter((item) => item.year === year);
+
+    let customIncome = 0;
+    let customBusinessExpenses = 0;
+    let customPersonalExpenses = 0;
+    let customSavings = 0;
+    let customInvestments = 0;
+
+    for (const customRow of customRows) {
+      const resolved = resolveManagedSection(
+        customRow.sectionKind === "INCOME"
+          ? "INCOME"
+          : customRow.sectionKind === "BUSINESS_EXPENSES" || customRow.sectionKind === "PERSONAL_EXPENSES"
+            ? "COSTS"
+            : "SAVINGS_INVESTMENTS",
+        customRow.name,
+        sectionSettings
+      );
+      const monthValue = customRow.months[monthIndex] ?? 0;
+
+      if (resolved.kind === "INCOME") {
+        customIncome += monthValue;
+      }
+
+      if (resolved.kind === "BUSINESS_EXPENSES") {
+        customBusinessExpenses += monthValue;
+      }
+
+      if (resolved.kind === "PERSONAL_EXPENSES") {
+        customPersonalExpenses += monthValue;
+      }
+
+      if (resolved.kind === "SAVINGS") {
+        customSavings += monthValue;
+      }
+
+      if (resolved.kind === "INVESTMENTS") {
+        customInvestments += monthValue;
+      }
+    }
+
     return {
-      businessIncome,
-      businessExpenses,
-      transferToPersonal: businessIncome - businessExpenses,
-      personalExpenses,
-      savings,
-      investments
+      businessIncome: businessIncome + customIncome,
+      businessExpenses: businessExpenses + customBusinessExpenses,
+      transferToPersonal: (businessIncome + customIncome) - (businessExpenses + customBusinessExpenses),
+      personalExpenses: personalExpenses + customPersonalExpenses,
+      savings: savings + customSavings,
+      investments: investments + customInvestments
     };
-  }, [annualPlan, month]);
+  }, [annualCustomItems, annualPlan, month, sectionSettings, year]);
 
   return (
     <div className="space-y-8">
@@ -118,7 +184,7 @@ export function BudgetOverview() {
             tone="purple"
             label="Business Expenses"
             value={monthMetrics.businessExpenses}
-            icon={<span className="text-[22px] font-semibold">$</span>}
+            icon={<span className="text-base font-semibold">$</span>}
           />
           <ArrowRightIcon size={30} className="mx-auto hidden text-[#6d7184] xl:block" />
           <FlowCard

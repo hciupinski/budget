@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, SaveIcon } from "@/components/budget/icons";
@@ -8,15 +8,50 @@ import {
   asCurrency,
   asSignedCurrency,
   differenceTone,
-  getSectionGroup,
-  getSectionLabel,
-  sectionRowTone,
-  splitMonthlyByBusinessAndPersonal
+  sectionRowTone
 } from "@/components/budget/budget-ui-utils";
+import {
+  resolveManagedSection,
+  useSectionSettings,
+  type ManagedSection,
+  type ManagedSectionKind
+} from "@/lib/section-settings";
+import {
+  createMonthlyCustomDraft,
+  PLANNER_CUSTOM_EVENT,
+  readAnnualCustomItems,
+  readHiddenMonthlyApiRows,
+  readMonthlyCustomItems,
+  readNameOverrides,
+  saveAnnualCustomItems,
+  saveHiddenMonthlyApiRows,
+  saveMonthlyCustomItems,
+  saveNameOverrides,
+  type ActionStatus,
+  type AnnualCustomItem,
+  type MonthlyCustomItem
+} from "@/lib/planner-custom-items";
 
-type ActionStatus = "PLANNED" | "DONE" | "PARTIAL" | "SKIPPED";
-
-const GROUP_ORDER = ["INCOME", "BUSINESS_EXPENSES", "PERSONAL_EXPENSES", "SAVINGS_INVESTMENTS"] as const;
+type MonthlyDisplayRow = {
+  rowId: string;
+  source: "api" | "annualCustom" | "monthlyCustom";
+  actionId?: string;
+  categoryId?: string;
+  annualCustomId?: string;
+  monthlyCustomId?: string;
+  name: string;
+  section: "INCOME" | "COSTS" | "SAVINGS_INVESTMENTS";
+  plannedAmount: number;
+  actualAmount: number | null;
+  status: ActionStatus;
+  resolvedSection: {
+    id: string;
+    name: string;
+    kind: ManagedSectionKind;
+    order: number;
+    sectionId: string;
+  };
+};
 
 const STATUS_LABELS: Record<ActionStatus, string> = {
   PLANNED: "Unpaid",
@@ -25,15 +60,88 @@ const STATUS_LABELS: Record<ActionStatus, string> = {
   SKIPPED: "Skipped"
 };
 
+function fallbackLabelFromKind(kind: ManagedSectionKind): string {
+  if (kind === "INCOME") {
+    return "Income";
+  }
+
+  if (kind === "BUSINESS_EXPENSES") {
+    return "Business Expenses";
+  }
+
+  if (kind === "PERSONAL_EXPENSES") {
+    return "Personal Expenses";
+  }
+
+  if (kind === "SAVINGS") {
+    return "Savings";
+  }
+
+  return "Investments";
+}
+
+function resolveCustomSection(
+  input: { sectionId: string; sectionKind: ManagedSectionKind },
+  sections: ManagedSection[]
+) {
+  const byId = sections.find((section) => section.id === input.sectionId);
+  if (byId) {
+    return {
+      id: byId.id,
+      name: byId.name,
+      kind: byId.kind,
+      order: byId.order,
+      sectionId: byId.id
+    };
+  }
+
+  const byKind = sections.find((section) => section.kind === input.sectionKind);
+  if (byKind) {
+    return {
+      id: byKind.id,
+      name: byKind.name,
+      kind: byKind.kind,
+      order: byKind.order,
+      sectionId: byKind.id
+    };
+  }
+
+  return {
+    id: `fallback-${input.sectionKind}`,
+    name: fallbackLabelFromKind(input.sectionKind),
+    kind: input.sectionKind,
+    order: 999,
+    sectionId: ""
+  };
+}
+
+function sectionFromKind(kind: ManagedSectionKind): "INCOME" | "COSTS" | "SAVINGS_INVESTMENTS" {
+  if (kind === "INCOME") {
+    return "INCOME";
+  }
+
+  if (kind === "BUSINESS_EXPENSES" || kind === "PERSONAL_EXPENSES") {
+    return "COSTS";
+  }
+
+  return "SAVINGS_INVESTMENTS";
+}
+
 export function MonthlyWorkspace() {
   const now = new Date();
+  const sectionSettings = useSectionSettings();
   const [year, setYear] = useState<number>(now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
   const [workspace, setWorkspace] = useState<MonthlyWorkspaceResponse | null>(null);
+  const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
+  const [monthlyCustomItems, setMonthlyCustomItems] = useState<MonthlyCustomItem[]>([]);
+  const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
+  const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
+  const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
 
   function redirectToLoginIfUnauthorized(statusCode: number): boolean {
     if (statusCode === 401) {
@@ -72,30 +180,137 @@ export function MonthlyWorkspace() {
     void loadWorkspace();
   }, [loadWorkspace]);
 
+  useEffect(() => {
+    function syncLocalRows() {
+      setAnnualCustomItems(readAnnualCustomItems());
+      setMonthlyCustomItems(readMonthlyCustomItems());
+      setNameOverrides(readNameOverrides());
+      setHiddenApiRows(readHiddenMonthlyApiRows());
+    }
+
+    syncLocalRows();
+
+    window.addEventListener(PLANNER_CUSTOM_EVENT, syncLocalRows);
+    window.addEventListener("storage", syncLocalRows);
+
+    return () => {
+      window.removeEventListener(PLANNER_CUSTOM_EVENT, syncLocalRows);
+      window.removeEventListener("storage", syncLocalRows);
+    };
+  }, []);
+
   const rowsWithMeta = useMemo(() => {
-    const actions = workspace?.actions ?? [];
+    const rows: MonthlyDisplayRow[] = [];
 
-    return actions.map((row, rowIndex) => ({
-      row,
-      rowIndex,
-      group: getSectionGroup(row.section, row.categoryName)
-    }));
-  }, [workspace]);
+    for (const row of workspace?.actions ?? []) {
+      if (hiddenApiRows.includes(row.actionId)) {
+        continue;
+      }
 
-  const groupedRows = useMemo(
-    () =>
-      GROUP_ORDER.map((group) => ({
-        group,
-        label: getSectionLabel(group),
-        rows: rowsWithMeta.filter((row) => row.group === group)
-      })).filter((group) => group.rows.length > 0),
-    [rowsWithMeta]
-  );
+      const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+      const resolved = resolveManagedSection(row.section, displayName, sectionSettings);
 
-  function updateDraft(
-    actionId: string,
-    change: Partial<MonthlyWorkspaceResponse["actions"][number]>
-  ) {
+      rows.push({
+        rowId: `api-${row.actionId}`,
+        source: "api",
+        actionId: row.actionId,
+        categoryId: row.categoryId,
+        name: displayName,
+        section: row.section,
+        plannedAmount: row.plannedAmount,
+        actualAmount: row.actualAmount,
+        status: row.status,
+        resolvedSection: {
+          id: resolved.id,
+          name: resolved.name,
+          kind: resolved.kind,
+          order: resolved.order,
+          sectionId: resolved.id
+        }
+      });
+    }
+
+    for (const item of annualCustomItems.filter((item) => item.year === year)) {
+      const resolved = resolveCustomSection(item, sectionSettings);
+
+      rows.push({
+        rowId: `annual-custom-${item.id}`,
+        source: "annualCustom",
+        annualCustomId: item.id,
+        name: item.name,
+        section: sectionFromKind(resolved.kind),
+        plannedAmount: item.months[month - 1] ?? 0,
+        actualAmount: null,
+        status: "PLANNED",
+        resolvedSection: resolved
+      });
+    }
+
+    for (const item of monthlyCustomItems.filter((item) => item.year === year && item.month === month)) {
+      const resolved = resolveCustomSection(item, sectionSettings);
+
+      rows.push({
+        rowId: `monthly-custom-${item.id}`,
+        source: "monthlyCustom",
+        monthlyCustomId: item.id,
+        name: item.name,
+        section: sectionFromKind(resolved.kind),
+        plannedAmount: item.plannedAmount,
+        actualAmount: item.actualAmount,
+        status: item.status,
+        resolvedSection: resolved
+      });
+    }
+
+    return rows;
+  }, [annualCustomItems, hiddenApiRows, month, monthlyCustomItems, nameOverrides, sectionSettings, workspace?.actions, year]);
+
+  const groupedRows = useMemo(() => {
+    const groupedMap = new Map<
+      string,
+      {
+        id: string;
+        label: string;
+        kind: ManagedSectionKind;
+        order: number;
+        sectionId: string;
+        rows: MonthlyDisplayRow[];
+      }
+    >();
+
+    for (const section of [...sectionSettings].sort((a, b) => a.order - b.order)) {
+      groupedMap.set(section.id, {
+        id: section.id,
+        label: section.name,
+        kind: section.kind,
+        order: section.order,
+        sectionId: section.id,
+        rows: []
+      });
+    }
+
+    for (const row of rowsWithMeta) {
+      const existing = groupedMap.get(row.resolvedSection.id);
+
+      if (existing) {
+        existing.rows.push(row);
+        continue;
+      }
+
+      groupedMap.set(row.resolvedSection.id, {
+        id: row.resolvedSection.id,
+        label: row.resolvedSection.name,
+        kind: row.resolvedSection.kind,
+        order: row.resolvedSection.order,
+        sectionId: row.resolvedSection.sectionId,
+        rows: [row]
+      });
+    }
+
+    return Array.from(groupedMap.values()).sort((a, b) => a.order - b.order);
+  }, [rowsWithMeta, sectionSettings]);
+
+  function updateApiRow(actionId: string, change: Partial<MonthlyWorkspaceResponse["actions"][number]>) {
     if (!workspace) {
       return;
     }
@@ -111,6 +326,83 @@ export function MonthlyWorkspace() {
           : action
       )
     });
+  }
+
+  function updateMonthlyCustomRow(itemId: string, change: Partial<MonthlyCustomItem>) {
+    const next = monthlyCustomItems.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            ...change
+          }
+        : item
+    );
+
+    setMonthlyCustomItems(saveMonthlyCustomItems(next));
+  }
+
+  function addMonthlyRow(sectionId: string, sectionKind: ManagedSectionKind) {
+    const next = [...monthlyCustomItems, createMonthlyCustomDraft(year, month, sectionId, sectionKind)];
+    setMonthlyCustomItems(saveMonthlyCustomItems(next));
+  }
+
+  function removeRow(row: MonthlyDisplayRow) {
+    if (row.source === "api" && row.actionId) {
+      const next = saveHiddenMonthlyApiRows([...hiddenApiRows, row.actionId]);
+      setHiddenApiRows(next);
+      return;
+    }
+
+    if (row.source === "monthlyCustom" && row.monthlyCustomId) {
+      const next = monthlyCustomItems.filter((item) => item.id !== row.monthlyCustomId);
+      setMonthlyCustomItems(saveMonthlyCustomItems(next));
+      return;
+    }
+
+    if (row.source === "annualCustom" && row.annualCustomId) {
+      const next = annualCustomItems.filter((item) => item.id !== row.annualCustomId);
+      setAnnualCustomItems(saveAnnualCustomItems(next));
+    }
+  }
+
+  function commitNameEdit(row: MonthlyDisplayRow, value: string) {
+    const nextName = value.trim() || "Unnamed Item";
+
+    if (row.source === "api" && row.categoryId) {
+      const next = saveNameOverrides({
+        ...nameOverrides,
+        [row.categoryId]: nextName
+      });
+      setNameOverrides(next);
+      return;
+    }
+
+    if (row.source === "monthlyCustom" && row.monthlyCustomId) {
+      const next = monthlyCustomItems.map((item) =>
+        item.id === row.monthlyCustomId
+          ? {
+              ...item,
+              name: nextName
+            }
+          : item
+      );
+
+      setMonthlyCustomItems(saveMonthlyCustomItems(next));
+      return;
+    }
+
+    if (row.source === "annualCustom" && row.annualCustomId) {
+      const next = annualCustomItems.map((item) =>
+        item.id === row.annualCustomId
+          ? {
+              ...item,
+              name: nextName
+            }
+          : item
+      );
+
+      setAnnualCustomItems(saveAnnualCustomItems(next));
+    }
   }
 
   async function saveAllActions() {
@@ -149,7 +441,7 @@ export function MonthlyWorkspace() {
     }
 
     setSaving(false);
-    setMessage(`Saved ${completed} monthly items.`);
+    setMessage(`Saved ${completed} server-backed monthly items. Custom monthly rows are stored in UI only.`);
     await loadWorkspace();
   }
 
@@ -177,29 +469,76 @@ export function MonthlyWorkspace() {
     setMonth(shifted.getMonth() + 1);
   }
 
-  const monthlySplit = useMemo(
-    () =>
-      workspace
-        ? splitMonthlyByBusinessAndPersonal(workspace)
-        : {
-            businessCostsPlanned: 0,
-            businessCostsActual: 0,
-            personalCostsPlanned: 0,
-            personalCostsActual: 0,
-            savingsPlanned: 0,
-            savingsActual: 0,
-            investmentsPlanned: 0,
-            investmentsActual: 0
-          },
-    [workspace]
-  );
+  const summary = useMemo(() => {
+    let incomePlanned = 0;
+    let incomeActual = 0;
+    let businessCostsPlanned = 0;
+    let businessCostsActual = 0;
+    let personalCostsPlanned = 0;
+    let personalCostsActual = 0;
+    let savingsPlanned = 0;
+    let savingsActual = 0;
+    let investmentsPlanned = 0;
+    let investmentsActual = 0;
+
+    for (const row of rowsWithMeta) {
+      const actual = row.actualAmount ?? 0;
+
+      if (row.resolvedSection.kind === "INCOME") {
+        incomePlanned += row.plannedAmount;
+        incomeActual += actual;
+      }
+
+      if (row.resolvedSection.kind === "BUSINESS_EXPENSES") {
+        businessCostsPlanned += row.plannedAmount;
+        businessCostsActual += actual;
+      }
+
+      if (row.resolvedSection.kind === "PERSONAL_EXPENSES") {
+        personalCostsPlanned += row.plannedAmount;
+        personalCostsActual += actual;
+      }
+
+      if (row.resolvedSection.kind === "SAVINGS") {
+        savingsPlanned += row.plannedAmount;
+        savingsActual += actual;
+      }
+
+      if (row.resolvedSection.kind === "INVESTMENTS") {
+        investmentsPlanned += row.plannedAmount;
+        investmentsActual += actual;
+      }
+    }
+
+    const savingsInvestPlanned = savingsPlanned + investmentsPlanned;
+    const savingsInvestActual = savingsActual + investmentsActual;
+    const transferPlanned = incomePlanned - businessCostsPlanned;
+    const transferActual = incomeActual - businessCostsActual;
+    const remainderPlanned = transferPlanned - personalCostsPlanned - savingsInvestPlanned;
+    const remainderActual = transferActual - personalCostsActual - savingsInvestActual;
+
+    return {
+      incomePlanned,
+      incomeActual,
+      businessCostsPlanned,
+      businessCostsActual,
+      personalCostsPlanned,
+      personalCostsActual,
+      savingsInvestPlanned,
+      savingsInvestActual,
+      transferPlanned,
+      transferActual,
+      remainderPlanned,
+      remainderActual
+    };
+  }, [rowsWithMeta]);
 
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Monthly Planning</h1>
-          <p className="text-lg md:text-xl text-[#71768b]">Manage your monthly budget and track payments</p>
+          <h1 className="text-3xl font-semibold tracking-[-0.02em] text-[#0f1321] md:text-4xl">Monthly Planning</h1>
+          <p className="text-lg text-[#71768b] md:text-xl">Manage your monthly budget and track payments</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -250,7 +589,7 @@ export function MonthlyWorkspace() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm md:text-base text-[#171b27] hover:bg-[#e9ebf0]"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm text-[#171b27] hover:bg-[#e9ebf0] md:text-base"
             onClick={() => void generateFromAnnualPlan()}
           >
             <CopyIcon size={20} />
@@ -259,7 +598,7 @@ export function MonthlyWorkspace() {
 
           <button
             type="button"
-            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm md:text-base text-white hover:opacity-95 disabled:opacity-60"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm text-white hover:opacity-95 disabled:opacity-60 md:text-base"
             onClick={() => void saveAllActions()}
             disabled={!workspace || saving || loading}
           >
@@ -269,40 +608,35 @@ export function MonthlyWorkspace() {
         </div>
       </header>
 
-      {message ? <p className="text-sm md:text-base text-[#686e84]">{message}</p> : null}
-      {loading ? <p className="text-sm md:text-base text-[#686e84]">Loading monthly plan...</p> : null}
+      {message ? <p className="text-sm text-[#686e84] md:text-base">{message}</p> : null}
+      {loading ? <p className="text-sm text-[#686e84] md:text-base">Loading monthly plan...</p> : null}
 
       {workspace ? (
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <MonthlyMetricCard
-              label="INCOME"
-              planned={workspace.summary.incomePlanned}
-              actual={workspace.summary.incomeActual}
-              valueTone="text-[#10a34a]"
-            />
+            <MonthlyMetricCard label="INCOME" planned={summary.incomePlanned} actual={summary.incomeActual} valueTone="text-[#10a34a]" />
             <MonthlyMetricCard
               label="BUSINESS COSTS"
-              planned={monthlySplit.businessCostsPlanned}
-              actual={monthlySplit.businessCostsActual}
+              planned={summary.businessCostsPlanned}
+              actual={summary.businessCostsActual}
               valueTone="text-[#8f30ff]"
             />
             <MonthlyMetricCard
               label="PERSONAL COSTS"
-              planned={monthlySplit.personalCostsPlanned}
-              actual={monthlySplit.personalCostsActual}
+              planned={summary.personalCostsPlanned}
+              actual={summary.personalCostsActual}
               valueTone="text-[#f35b00]"
             />
             <MonthlyMetricCard
               label="SAVINGS / INVEST"
-              planned={workspace.summary.savingsPlanned}
-              actual={workspace.summary.savingsActual}
+              planned={summary.savingsInvestPlanned}
+              actual={summary.savingsInvestActual}
               valueTone="text-[#2563eb]"
             />
             <MonthlyMetricCard
               label="REMAINDER"
-              planned={workspace.summary.remainderPlanned}
-              actual={workspace.summary.remainderActual}
+              planned={summary.remainderPlanned}
+              actual={summary.remainderActual}
               valueTone="text-[#e11d48]"
               danger
             />
@@ -310,105 +644,226 @@ export function MonthlyWorkspace() {
 
           <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
             <div className="border-b border-[#d5d9e0] p-6 md:p-8">
-              <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">
-                Budget Items for {MONTH_LABELS[month - 1]} {year}
-              </h2>
-              <p className="mt-2 text-base md:text-lg text-[#73788d]">
-                Manage budgeted amounts, track actual spending, and update payment status
-              </p>
+              <h2 className="text-2xl font-medium text-[#171a24] md:text-3xl">Budget Items for {MONTH_LABELS[month - 1]} {year}</h2>
+              <p className="mt-2 text-base text-[#73788d] md:text-lg">Manage budgeted amounts, track actual spending, and update payment status</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-max min-w-full border-collapse">
                 <thead>
                   <tr className="bg-[#eceef2]">
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Section</th>
-                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Category</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Budgeted</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Actual</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Difference</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Status</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Notes</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Section</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Category</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Budgeted</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Actual</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Difference</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm font-semibold text-[#171b25] md:text-base">Status</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-left text-sm font-semibold text-[#171b25] md:text-base">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {groupedRows.map((group) => (
-                    group.rows.map(({ row }, index) => {
-                      const actual = row.actualAmount ?? 0;
-                      const difference = actual - row.plannedAmount;
-
-                      return (
-                        <tr key={row.actionId} className={sectionRowTone(group.group)}>
-                          {index === 0 ? (
-                            <td
-                              rowSpan={group.rows.length}
-                              className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg md:text-xl text-[#1b1f2b]"
+                    <Fragment key={group.id}>
+                      {group.rows.length === 0 ? (
+                        <tr key={`${group.id}-empty`} className={sectionRowTone(group.kind)}>
+                          <td className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl">
+                            {group.label}
+                          </td>
+                          <td className="border-b border-[#cad0d8] px-4 py-4" colSpan={6}>
+                            <button
+                              type="button"
+                              onClick={() => addMonthlyRow(group.sectionId, group.kind)}
+                              className="h-7 rounded-lg border border-[#c6cad2] bg-[#f8f9fb] px-3 text-xs text-[#30384b]"
                             >
-                              {group.label}
-                            </td>
-                          ) : null}
-
-                          <td className="border-b border-[#cad0d8] px-4 py-4 text-lg md:text-xl text-[#1b1f2b]">{row.categoryName}</td>
-
-                          <td className="border-b border-[#cad0d8] px-3 py-3">
-                            <div className="grid h-11 min-w-[108px] place-items-center rounded-xl bg-[#eff1f4] text-sm md:text-base font-medium text-[#1f2430]">
-                              {row.plannedAmount}
-                            </div>
-                          </td>
-
-                          <td className="border-b border-[#cad0d8] px-3 py-3">
-                            <Input
-                              type="number"
-                              step="0.01"
-                              className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm md:text-base font-medium text-[#1f2430] shadow-none"
-                              value={row.actualAmount ?? ""}
-                              onChange={(event) => {
-                                const parsed = Number.parseFloat(event.target.value);
-                                updateDraft(row.actionId, {
-                                  actualAmount: Number.isFinite(parsed) ? parsed : null
-                                });
-                              }}
-                            />
-                          </td>
-
-                          <td className={`border-b border-[#cad0d8] px-3 py-3 text-center text-base md:text-lg ${differenceTone(row.section, difference)}`}>
-                            {difference === 0 ? "-" : asSignedCurrency(difference)}
-                          </td>
-
-                          <td className="border-b border-[#cad0d8] px-3 py-3">
-                            <select
-                              className="h-11 min-w-[160px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm md:text-base text-[#1f2430]"
-                              value={row.status}
-                              onChange={(event) =>
-                                updateDraft(row.actionId, {
-                                  status: event.target.value as ActionStatus
-                                })
-                              }
-                            >
-                              {Object.entries(STATUS_LABELS).map(([status, label]) => (
-                                <option key={`${row.actionId}-${status}`} value={status}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-
-                          <td className="border-b border-[#cad0d8] px-3 py-3">
-                            <Input
-                              value={notes[row.actionId] ?? ""}
-                              onChange={(event) =>
-                                setNotes((current) => ({
-                                  ...current,
-                                  [row.actionId]: event.target.value
-                                }))
-                              }
-                              placeholder="Add notes..."
-                              className="h-11 min-w-[180px] rounded-xl border-0 bg-[#eff1f4] text-sm md:text-base text-[#6d7287] shadow-none"
-                            />
+                              + add item
+                            </button>
                           </td>
                         </tr>
-                      );
-                    })
+                      ) : (
+                        <>
+                          {group.rows.map((row, index) => {
+                            const difference =
+                              row.actualAmount === null ? null : row.actualAmount - row.plannedAmount;
+
+                            return (
+                              <tr key={row.rowId} className={sectionRowTone(group.kind)}>
+                                {index === 0 ? (
+                                  <td
+                                    rowSpan={group.rows.length + 1}
+                                    className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg text-[#1b1f2b] md:text-xl"
+                                  >
+                                    {group.label}
+                                  </td>
+                                ) : null}
+
+                                <td className="border-b border-[#cad0d8] px-4 py-4 text-lg text-[#1b1f2b] md:text-xl">
+                                  <div className="flex items-center justify-between gap-2">
+                                    {editingName?.rowId === row.rowId ? (
+                                      <Input
+                                        value={editingName.value}
+                                        onChange={(event) =>
+                                          setEditingName((current) =>
+                                            current ? { ...current, value: event.target.value } : current
+                                          )
+                                        }
+                                        autoFocus
+                                        onBlur={() => {
+                                          commitNameEdit(row, editingName.value);
+                                          setEditingName(null);
+                                        }}
+                                        onKeyDown={(event) => {
+                                          if (event.key === "Enter") {
+                                            commitNameEdit(row, editingName.value);
+                                            setEditingName(null);
+                                          }
+
+                                          if (event.key === "Escape") {
+                                            setEditingName(null);
+                                          }
+                                        }}
+                                        className="h-10 rounded-xl border-[#cfd3da] bg-[#f8f9fb]"
+                                      />
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingName({ rowId: row.rowId, value: row.name })}
+                                        className="text-left underline decoration-dotted underline-offset-4"
+                                      >
+                                        {row.name}
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => removeRow(row)}
+                                      className="h-7 rounded-lg border border-[#f2a2b5] bg-[#fff1f4] px-2 text-xs text-[#be123c]"
+                                    >
+                                      remove
+                                    </button>
+                                  </div>
+                                </td>
+
+                                <td className="border-b border-[#cad0d8] px-3 py-3">
+                                  {row.source === "monthlyCustom" && row.monthlyCustomId ? (
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                      value={row.plannedAmount}
+                                      onChange={(event) => {
+                                        const parsed = Number.parseFloat(event.target.value);
+                                        updateMonthlyCustomRow(row.monthlyCustomId!, {
+                                          plannedAmount: Number.isFinite(parsed) ? parsed : 0
+                                        });
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="grid h-11 min-w-[108px] place-items-center rounded-xl bg-[#eff1f4] text-sm font-medium text-[#1f2430] md:text-base">
+                                      {row.plannedAmount}
+                                    </div>
+                                  )}
+                                </td>
+
+                                <td className="border-b border-[#cad0d8] px-3 py-3">
+                                  {row.source === "annualCustom" ? (
+                                    <div className="grid h-11 min-w-[108px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
+                                      -
+                                    </div>
+                                  ) : (
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                      value={row.actualAmount ?? ""}
+                                      onChange={(event) => {
+                                        const parsed = Number.parseFloat(event.target.value);
+                                        const nextActual = Number.isFinite(parsed) ? parsed : null;
+
+                                        if (row.source === "api" && row.actionId) {
+                                          updateApiRow(row.actionId, { actualAmount: nextActual });
+                                          return;
+                                        }
+
+                                        if (row.source === "monthlyCustom" && row.monthlyCustomId) {
+                                          updateMonthlyCustomRow(row.monthlyCustomId, { actualAmount: nextActual });
+                                        }
+                                      }}
+                                    />
+                                  )}
+                                </td>
+
+                                <td
+                                  className={`border-b border-[#cad0d8] px-3 py-3 text-center text-base md:text-lg ${
+                                    difference === null ? "text-[#6b7280]" : differenceTone(row.section, difference)
+                                  }`}
+                                >
+                                  {difference === null ? "-" : difference === 0 ? "-" : asSignedCurrency(difference)}
+                                </td>
+
+                                <td className="border-b border-[#cad0d8] px-3 py-3">
+                                  {row.source === "annualCustom" ? (
+                                    <div className="grid h-11 min-w-[160px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
+                                      From annual
+                                    </div>
+                                  ) : (
+                                    <select
+                                      className="h-11 min-w-[160px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm text-[#1f2430] md:text-base"
+                                      value={row.status}
+                                      onChange={(event) => {
+                                        if (row.source === "api" && row.actionId) {
+                                          updateApiRow(row.actionId, {
+                                            status: event.target.value as ActionStatus
+                                          });
+                                          return;
+                                        }
+
+                                        if (row.source === "monthlyCustom" && row.monthlyCustomId) {
+                                          updateMonthlyCustomRow(row.monthlyCustomId, {
+                                            status: event.target.value as ActionStatus
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      {Object.entries(STATUS_LABELS).map(([status, label]) => (
+                                        <option key={`${row.rowId}-${status}`} value={status}>
+                                          {label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </td>
+
+                                <td className="border-b border-[#cad0d8] px-3 py-3">
+                                  <Input
+                                    value={notes[row.rowId] ?? ""}
+                                    onChange={(event) =>
+                                      setNotes((current) => ({
+                                        ...current,
+                                        [row.rowId]: event.target.value
+                                      }))
+                                    }
+                                    placeholder="Add notes..."
+                                    className="h-11 min-w-[180px] rounded-xl border-0 bg-[#eff1f4] text-sm text-[#6d7287] shadow-none md:text-base"
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+
+                          <tr key={`${group.id}-add`} className={sectionRowTone(group.kind)}>
+                            <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={6}>
+                              <button
+                                type="button"
+                                onClick={() => addMonthlyRow(group.sectionId, group.kind)}
+                                className="h-7 rounded-lg border border-[#c6cad2] bg-[#f8f9fb] px-3 text-xs text-[#30384b]"
+                              >
+                                + add item
+                              </button>
+                            </td>
+                          </tr>
+                        </>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -416,24 +871,24 @@ export function MonthlyWorkspace() {
           </section>
 
           <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
-            <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
+            <h2 className="text-2xl font-medium text-[#171a24] md:text-3xl">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
 
             <div className="mt-6 grid gap-8 xl:grid-cols-2">
               <SummaryColumn
                 label="BUDGETED"
-                income={workspace.summary.incomePlanned}
-                business={monthlySplit.businessCostsPlanned}
-                personal={monthlySplit.personalCostsPlanned}
-                savings={workspace.summary.savingsPlanned}
-                remainder={workspace.summary.remainderPlanned}
+                income={summary.incomePlanned}
+                business={summary.businessCostsPlanned}
+                personal={summary.personalCostsPlanned}
+                savings={summary.savingsInvestPlanned}
+                remainder={summary.remainderPlanned}
               />
               <SummaryColumn
                 label="ACTUAL"
-                income={workspace.summary.incomeActual}
-                business={monthlySplit.businessCostsActual}
-                personal={monthlySplit.personalCostsActual}
-                savings={workspace.summary.savingsActual}
-                remainder={workspace.summary.remainderActual}
+                income={summary.incomeActual}
+                business={summary.businessCostsActual}
+                personal={summary.personalCostsActual}
+                savings={summary.savingsInvestActual}
+                remainder={summary.remainderActual}
               />
             </div>
           </section>
@@ -457,12 +912,10 @@ function MonthlyMetricCard({
   danger?: boolean;
 }) {
   return (
-    <div
-      className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}
-    >
-      <p className="text-sm md:text-base tracking-wide text-[#72778b]">{label}</p>
-      <p className={`mt-2 text-3xl md:text-4xl font-medium ${valueTone}`}>{asCurrency(planned)}</p>
-      <p className="mt-1 text-sm md:text-base text-[#72778b]">
+    <div className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}>
+      <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
+      <p className={`mt-2 text-3xl font-medium md:text-4xl ${valueTone}`}>{asCurrency(planned)}</p>
+      <p className="mt-1 text-sm text-[#72778b] md:text-base">
         Actual: <span className={valueTone}>{asCurrency(actual)}</span>
       </p>
     </div>
@@ -488,7 +941,7 @@ function SummaryColumn({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm md:text-base tracking-wide text-[#72778b]">{label}</p>
+      <p className="text-sm tracking-wide text-[#72778b] md:text-base">{label}</p>
 
       <SummaryLine label="Total Business Income" value={income} valueTone="text-[#10a34a]" />
       <SummaryLine label="- Business Expenses" value={-business} valueTone="text-[#8f30ff]" />
