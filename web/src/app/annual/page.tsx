@@ -6,10 +6,7 @@ export default async function AnnualPlannerPage() {
   await requireOwnerSession();
 
   return (
-    <BudgetShell
-      title="Annual Planner"
-      description="Plan category values across Jan-Dec with totals and copy-from-previous-year support."
-    >
+    <BudgetShell>
       <AnnualPlanner />
     </BudgetShell>
   );

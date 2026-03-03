@@ -1,13 +1,13 @@
-import { BudgetOverview } from "@/components/budget/budget-overview";
+import { AccountsView } from "@/components/budget/accounts-view";
 import { BudgetShell } from "@/components/budget/budget-shell";
 import { requireOwnerSession } from "@/lib/require-owner-session";
 
-export default async function HomePage() {
+export default async function AccountsPage() {
   await requireOwnerSession();
 
   return (
     <BudgetShell>
-      <BudgetOverview />
+      <AccountsView />
     </BudgetShell>
   );
 }

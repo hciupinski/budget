@@ -6,10 +6,7 @@ export default async function MonthlyWorkspacePage() {
   await requireOwnerSession();
 
   return (
-    <BudgetShell
-      title="Monthly Workspace"
-      description="Generate monthly actions from annual plan and execute checklist statuses with audit trail."
-    >
+    <BudgetShell>
       <MonthlyWorkspace />
     </BudgetShell>
   );

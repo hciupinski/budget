@@ -1,18 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type AnnualPlanResponse } from "@/lib/budget-types";
+import { CopyIcon, RefreshIcon, SaveIcon } from "@/components/budget/icons";
+import {
+  asCurrency,
+  asSignedCurrency,
+  getSectionGroup,
+  getSectionLabel,
+  sectionRowTone,
+  splitAnnualByBusinessAndPersonal
+} from "@/components/budget/budget-ui-utils";
 
-function asCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2
-  }).format(value);
-}
+const GROUP_ORDER = ["INCOME", "BUSINESS_EXPENSES", "PERSONAL_EXPENSES", "SAVINGS_INVESTMENTS"] as const;
 
 export function AnnualPlanner() {
   const now = new Date();
@@ -51,8 +52,7 @@ export function AnnualPlanner() {
       return;
     }
 
-    const data = (await response.json()) as AnnualPlanResponse;
-    setAnnualPlan(data);
+    setAnnualPlan((await response.json()) as AnnualPlanResponse);
     setLoading(false);
   }, []);
 
@@ -60,7 +60,25 @@ export function AnnualPlanner() {
     void loadAnnualPlan(year);
   }, [loadAnnualPlan, year]);
 
-  const categories = useMemo(() => annualPlan?.categories ?? [], [annualPlan]);
+  const rowsWithMeta = useMemo(() => {
+    const rows = annualPlan?.categories ?? [];
+
+    return rows.map((row, rowIndex) => ({
+      row,
+      rowIndex,
+      group: getSectionGroup(row.section, row.categoryName)
+    }));
+  }, [annualPlan]);
+
+  const groupedRows = useMemo(
+    () =>
+      GROUP_ORDER.map((group) => ({
+        group,
+        label: getSectionLabel(group),
+        rows: rowsWithMeta.filter((row) => row.group === group)
+      })).filter((group) => group.rows.length > 0),
+    [rowsWithMeta]
+  );
 
   function updateCell(rowIndex: number, monthIndex: number, value: string) {
     if (!annualPlan) {
@@ -88,12 +106,8 @@ export function AnnualPlanner() {
       };
     });
 
-    const income = nextRows
-      .filter((row) => row.section === "INCOME")
-      .reduce((sum, row) => sum + row.total, 0);
-    const costs = nextRows
-      .filter((row) => row.section === "COSTS")
-      .reduce((sum, row) => sum + row.total, 0);
+    const income = nextRows.filter((row) => row.section === "INCOME").reduce((sum, row) => sum + row.total, 0);
+    const costs = nextRows.filter((row) => row.section === "COSTS").reduce((sum, row) => sum + row.total, 0);
     const savingsInvestments = nextRows
       .filter((row) => row.section === "SAVINGS_INVESTMENTS")
       .reduce((sum, row) => sum + row.total, 0);
@@ -147,8 +161,7 @@ export function AnnualPlanner() {
       return;
     }
 
-    const nextPlan = (await response.json()) as AnnualPlanResponse;
-    setAnnualPlan(nextPlan);
+    setAnnualPlan((await response.json()) as AnnualPlanResponse);
     setSaving(false);
     setMessage("Annual plan saved.");
   }
@@ -171,103 +184,221 @@ export function AnnualPlanner() {
       return;
     }
 
-    const nextPlan = (await response.json()) as AnnualPlanResponse;
-    setAnnualPlan(nextPlan);
+    setAnnualPlan((await response.json()) as AnnualPlanResponse);
     setSaving(false);
     setMessage(`Copied annual plan from ${year - 1}.`);
   }
 
+  const splitTotals = useMemo(
+    () =>
+      annualPlan
+        ? splitAnnualByBusinessAndPersonal(annualPlan)
+        : {
+            businessCosts: 0,
+            personalCosts: 0,
+            savings: 0,
+            investments: 0
+          },
+    [annualPlan]
+  );
+
+  const savingsAndInvestments = splitTotals.savings + splitTotals.investments;
+  const transferToPersonal = (annualPlan?.summary.income ?? 0) - splitTotals.businessCosts;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Annual Planner</CardTitle>
-        <CardDescription>Edit Jan-Dec planned values and yearly totals.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="number"
-            min={2000}
-            max={2100}
-            className="w-28"
-            value={year}
-            onChange={(event) => setYear(Number.parseInt(event.target.value, 10) || year)}
-          />
-          <Button type="button" variant="outline" onClick={() => void loadAnnualPlan(year)}>
-            Reload
-          </Button>
-          <Button type="button" variant="secondary" onClick={copyFromPreviousYear} disabled={saving}>
-            Copy {year - 1}
-          </Button>
-          <Button type="button" onClick={saveAnnualPlan} disabled={saving || loading || !annualPlan}>
-            {saving ? "Saving..." : "Save Annual Plan"}
-          </Button>
-          {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+    <div className="space-y-6">
+      <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Annual Budget Planning</h1>
+          <p className="text-lg md:text-xl text-[#71768b]">Plan your budget across all months</p>
         </div>
 
-        {loading ? <p className="text-sm text-muted-foreground">Loading annual plan...</p> : null}
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <select
+            className="h-12 min-w-[132px] rounded-2xl border border-[#d1d5dd] bg-[#e9eaed] px-4 text-lg text-[#202532]"
+            value={year}
+            onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
+          >
+            {Array.from({ length: 9 }).map((_, index) => {
+              const optionYear = now.getFullYear() - 3 + index;
+              return (
+                <option key={optionYear} value={optionYear}>
+                  {optionYear}
+                </option>
+              );
+            })}
+          </select>
 
-        {!loading && annualPlan ? (
-          <div className="space-y-3 overflow-x-auto pb-1">
-            <table className="w-max min-w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="min-w-[170px] border px-2 py-2 text-left">Category</th>
-                  <th className="min-w-[210px] border px-2 py-2 text-left">Section</th>
-                  {MONTH_LABELS.map((label) => (
-                    <th key={label} className="w-[96px] min-w-[96px] border px-2 py-2 text-right whitespace-nowrap">
-                      {label}
-                    </th>
-                  ))}
-                  <th className="min-w-[145px] border px-2 py-2 text-right whitespace-nowrap">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {categories.map((row, rowIndex) => (
-                  <tr key={row.categoryId}>
-                    <td className="border px-2 py-2 whitespace-nowrap">{row.categoryName}</td>
-                    <td className="border px-2 py-2 whitespace-nowrap">{row.section}</td>
-                    {row.months.map((monthValue, monthIndex) => (
-                      <td
-                        key={`${row.categoryId}-${monthIndex}`}
-                        className="w-[96px] min-w-[96px] border px-1 py-1"
+          <button
+            type="button"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm md:text-base text-[#171b27] hover:bg-[#e9ebf0]"
+            onClick={() => void loadAnnualPlan(year)}
+          >
+            <RefreshIcon size={20} />
+            Reload
+          </button>
+
+          <button
+            type="button"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm md:text-base text-[#171b27] hover:bg-[#e9ebf0]"
+            onClick={() => void copyFromPreviousYear()}
+            disabled={saving}
+          >
+            <CopyIcon size={20} />
+            Copy {year - 1}
+          </button>
+
+          <button
+            type="button"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm md:text-base text-white hover:opacity-95 disabled:opacity-60"
+            onClick={() => void saveAnnualPlan()}
+            disabled={saving || loading || !annualPlan}
+          >
+            <SaveIcon size={20} />
+            {saving ? "Saving..." : "Save Annual Plan"}
+          </button>
+        </div>
+      </header>
+
+      {message ? <p className="text-sm md:text-base text-[#686e84]">{message}</p> : null}
+      {loading ? <p className="text-sm md:text-base text-[#686e84]">Loading annual plan...</p> : null}
+
+      {annualPlan ? (
+        <>
+          <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
+            <div className="overflow-x-auto">
+              <table className="w-max min-w-full border-collapse">
+                <thead>
+                  <tr className="bg-[#eceef2]">
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Section</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Item</th>
+                    {MONTH_LABELS.map((label) => (
+                      <th
+                        key={label}
+                        className="w-[122px] border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]"
                       >
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="numeric-input h-8 min-w-[88px] px-2 text-right text-sm tabular-nums"
-                          value={monthValue}
-                          onChange={(event) => updateCell(rowIndex, monthIndex, event.target.value)}
-                        />
-                      </td>
+                        {label}
+                      </th>
                     ))}
-                    <td className="min-w-[145px] border px-2 py-2 text-right font-medium tabular-nums whitespace-nowrap">
-                      {asCurrency(row.total)}
-                    </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {groupedRows.map((group) => (
+                    group.rows.map(({ row, rowIndex }, index) => (
+                      <tr key={row.categoryId} className={sectionRowTone(group.group)}>
+                        {index === 0 ? (
+                          <td
+                            rowSpan={group.rows.length}
+                            className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg md:text-xl text-[#1b1f2b]"
+                          >
+                            {group.label}
+                          </td>
+                        ) : null}
 
-            <div className="grid gap-3 md:grid-cols-5">
-              <SummaryCard label="Income" value={annualPlan.summary.income} />
-              <SummaryCard label="Costs" value={annualPlan.summary.costs} />
-              <SummaryCard label="Savings / Invest" value={annualPlan.summary.savingsInvestments} />
-              <SummaryCard label="Remainder" value={annualPlan.summary.remainder} />
-              <SummaryCard label="Grand Total" value={annualPlan.summary.grandTotal} />
+                        <td className="border-b border-[#cad0d8] px-4 py-4 text-lg md:text-xl text-[#1b1f2b]">{row.categoryName}</td>
+
+                        {row.months.map((monthValue, monthIndex) => (
+                          <td key={`${row.categoryId}-${monthIndex}`} className="border-b border-[#cad0d8] px-2 py-3">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm md:text-base font-medium text-[#1f2430] shadow-none"
+                              value={monthValue}
+                              onChange={(event) => updateCell(rowIndex, monthIndex, event.target.value)}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MetricCard label="INCOME" value={annualPlan.summary.income} valueTone="text-[#10a34a]" />
+            <MetricCard label="BUSINESS COSTS" value={splitTotals.businessCosts} valueTone="text-[#8f30ff]" />
+            <MetricCard label="PERSONAL COSTS" value={splitTotals.personalCosts} valueTone="text-[#f35b00]" />
+            <MetricCard label="SAVINGS / INVEST" value={savingsAndInvestments} valueTone="text-[#2563eb]" />
+            <MetricCard
+              label="REMAINDER"
+              value={annualPlan.summary.remainder}
+              valueTone="text-[#e11d48]"
+              danger
+            />
+          </section>
+
+          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
+            <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Annual Money Flow Summary</h2>
+
+            <div className="mt-6 space-y-4 text-lg md:text-xl">
+              <SummaryLine label="Total Business Income" value={annualPlan.summary.income} valueTone="text-[#10a34a]" />
+              <SummaryLine
+                label="- Business Expenses"
+                value={-splitTotals.businessCosts}
+                valueTone="text-[#8f30ff]"
+              />
+
+              <div className="border-t border-[#d7dbe2]" />
+
+              <SummaryLine label="Transfer to Personal" value={transferToPersonal} valueTone="text-[#10a34a]" />
+              <SummaryLine
+                label="- Personal Expenses"
+                value={-splitTotals.personalCosts}
+                valueTone="text-[#f35b00]"
+              />
+              <SummaryLine
+                label="- Savings"
+                value={-savingsAndInvestments}
+                valueTone="text-[#2563eb]"
+              />
+
+              <div className="border-t border-[#d7dbe2]" />
+
+              <SummaryLine label="Remainder (Unallocated)" value={annualPlan.summary.remainder} valueTone="text-[#e11d48]" />
+            </div>
+          </section>
+        </>
+      ) : null}
+    </div>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
+function MetricCard({
+  label,
+  value,
+  valueTone,
+  danger = false
+}: {
+  label: string;
+  value: number;
+  valueTone: string;
+  danger?: boolean;
+}) {
   return (
-    <div className="rounded-md border bg-background p-3">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="text-lg font-semibold">{asCurrency(value)}</p>
+    <div
+      className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}
+    >
+      <p className="text-sm md:text-base tracking-wide text-[#72778b]">{label}</p>
+      <p className={`mt-2 text-3xl md:text-4xl font-medium ${valueTone}`}>{asCurrency(value)}</p>
+    </div>
+  );
+}
+
+function SummaryLine({
+  label,
+  value,
+  valueTone
+}: {
+  label: string;
+  value: number;
+  valueTone: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <p className="text-[#6f7489]">{label}</p>
+      <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>
   );
 }

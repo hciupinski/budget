@@ -1,37 +1,39 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { MONTH_LABELS, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, SaveIcon } from "@/components/budget/icons";
 import {
-  MONTH_LABELS,
-  MONTHLY_STATUSES,
-  type AuditEntryResponse,
-  type MonthlyStatus,
-  type MonthlyWorkspaceResponse
-} from "@/lib/budget-types";
+  asCurrency,
+  asSignedCurrency,
+  differenceTone,
+  getSectionGroup,
+  getSectionLabel,
+  sectionRowTone,
+  splitMonthlyByBusinessAndPersonal
+} from "@/components/budget/budget-ui-utils";
 
-type ActionStatus = Exclude<MonthlyStatus, "ALL">;
+type ActionStatus = "PLANNED" | "DONE" | "PARTIAL" | "SKIPPED";
 
-function asCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2
-  }).format(value);
-}
+const GROUP_ORDER = ["INCOME", "BUSINESS_EXPENSES", "PERSONAL_EXPENSES", "SAVINGS_INVESTMENTS"] as const;
+
+const STATUS_LABELS: Record<ActionStatus, string> = {
+  PLANNED: "Unpaid",
+  DONE: "Paid",
+  PARTIAL: "Partial",
+  SKIPPED: "Skipped"
+};
 
 export function MonthlyWorkspace() {
   const now = new Date();
   const [year, setYear] = useState<number>(now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
-  const [filter, setFilter] = useState<MonthlyStatus>("ALL");
   const [workspace, setWorkspace] = useState<MonthlyWorkspaceResponse | null>(null);
-  const [auditEntries, setAuditEntries] = useState<AuditEntryResponse[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [savingActionId, setSavingActionId] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
   function redirectToLoginIfUnauthorized(statusCode: number): boolean {
     if (statusCode === 401) {
@@ -44,8 +46,9 @@ export function MonthlyWorkspace() {
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
+    setMessage(null);
 
-    const response = await fetch(`/api/budget/months/${year}/${month}?status=${filter}`, {
+    const response = await fetch(`/api/budget/months/${year}/${month}?status=ALL`, {
       method: "GET",
       cache: "no-store"
     });
@@ -56,58 +59,43 @@ export function MonthlyWorkspace() {
       }
 
       setWorkspace(null);
-      setMessage("Unable to load monthly workspace.");
+      setMessage("Unable to load monthly planning data.");
       setLoading(false);
       return;
     }
 
-    const data = (await response.json()) as MonthlyWorkspaceResponse;
-    setWorkspace(data);
+    setWorkspace((await response.json()) as MonthlyWorkspaceResponse);
     setLoading(false);
-  }, [filter, month, year]);
-
-  const loadAudit = useCallback(async () => {
-    const response = await fetch(`/api/budget/audit?year=${year}&month=${month}&limit=20`, {
-      method: "GET",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setAuditEntries([]);
-      return;
-    }
-
-    setAuditEntries((await response.json()) as AuditEntryResponse[]);
   }, [month, year]);
 
   useEffect(() => {
-    setMessage(null);
-    void Promise.all([loadWorkspace(), loadAudit()]);
-  }, [filter, loadAudit, loadWorkspace, month, year]);
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
-  async function generateFromAnnualPlan() {
-    const response = await fetch(`/api/budget/months/${year}/${month}/generate`, {
-      method: "POST"
-    });
+  const rowsWithMeta = useMemo(() => {
+    const actions = workspace?.actions ?? [];
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
+    return actions.map((row, rowIndex) => ({
+      row,
+      rowIndex,
+      group: getSectionGroup(row.section, row.categoryName)
+    }));
+  }, [workspace]);
 
-      setMessage("Failed to generate monthly actions.");
-      return;
-    }
+  const groupedRows = useMemo(
+    () =>
+      GROUP_ORDER.map((group) => ({
+        group,
+        label: getSectionLabel(group),
+        rows: rowsWithMeta.filter((row) => row.group === group)
+      })).filter((group) => group.rows.length > 0),
+    [rowsWithMeta]
+  );
 
-    setMessage("Monthly actions generated from annual plan.");
-    await Promise.all([loadWorkspace(), loadAudit()]);
-  }
-
-  function updateDraft(actionId: string, change: Partial<MonthlyWorkspaceResponse["actions"][number]>) {
+  function updateDraft(
+    actionId: string,
+    change: Partial<MonthlyWorkspaceResponse["actions"][number]>
+  ) {
     if (!workspace) {
       return;
     }
@@ -125,27 +113,49 @@ export function MonthlyWorkspace() {
     });
   }
 
-  async function saveAction(actionId: string) {
+  async function saveAllActions() {
     if (!workspace) {
       return;
     }
 
-    const action = workspace.actions.find((current) => current.actionId === actionId);
-    if (!action) {
-      return;
+    setSaving(true);
+    setMessage(null);
+
+    let completed = 0;
+
+    for (const action of workspace.actions) {
+      const response = await fetch(`/api/budget/months/${year}/${month}/actions/${action.actionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          status: action.status,
+          actualAmount: action.actualAmount
+        })
+      });
+
+      if (!response.ok) {
+        if (redirectToLoginIfUnauthorized(response.status)) {
+          return;
+        }
+
+        setSaving(false);
+        setMessage(`Failed to save ${action.categoryName}.`);
+        return;
+      }
+
+      completed += 1;
     }
 
-    setSavingActionId(actionId);
+    setSaving(false);
+    setMessage(`Saved ${completed} monthly items.`);
+    await loadWorkspace();
+  }
 
-    const response = await fetch(`/api/budget/months/${year}/${month}/actions/${actionId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        status: action.status,
-        actualAmount: action.actualAmount
-      })
+  async function generateFromAnnualPlan() {
+    const response = await fetch(`/api/budget/months/${year}/${month}/generate`, {
+      method: "POST"
     });
 
     if (!response.ok) {
@@ -153,193 +163,362 @@ export function MonthlyWorkspace() {
         return;
       }
 
-      setSavingActionId(null);
-      setMessage(`Failed to save ${action.categoryName}.`);
+      setMessage("Failed to copy budget from annual plan.");
       return;
     }
 
-    setSavingActionId(null);
-    setMessage(`Updated ${action.categoryName}.`);
-    await Promise.all([loadWorkspace(), loadAudit()]);
+    setMessage("Copied budget values from annual plan.");
+    await loadWorkspace();
   }
 
-  const actions = useMemo(() => workspace?.actions ?? [], [workspace]);
+  function shiftMonth(direction: -1 | 1) {
+    const shifted = new Date(year, month - 1 + direction, 1);
+    setYear(shifted.getFullYear());
+    setMonth(shifted.getMonth() + 1);
+  }
+
+  const monthlySplit = useMemo(
+    () =>
+      workspace
+        ? splitMonthlyByBusinessAndPersonal(workspace)
+        : {
+            businessCostsPlanned: 0,
+            businessCostsActual: 0,
+            personalCostsPlanned: 0,
+            personalCostsActual: 0,
+            savingsPlanned: 0,
+            savingsActual: 0,
+            investmentsPlanned: 0,
+            investmentsActual: 0
+          },
+    [workspace]
+  );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Monthly Workspace</CardTitle>
-        <CardDescription>Execute the month, track statuses, and update actual amounts.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="number"
-            min={2000}
-            max={2100}
-            className="w-28"
-            value={year}
-            onChange={(event) => setYear(Number.parseInt(event.target.value, 10) || year)}
-          />
-          <select
-            className="h-10 rounded-md border px-3 text-sm"
-            value={month}
-            onChange={(event) => setMonth(Number.parseInt(event.target.value, 10))}
-          >
-            {MONTH_LABELS.map((label, index) => (
-              <option key={label} value={index + 1}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-10 rounded-md border px-3 text-sm"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as MonthlyStatus)}
-          >
-            {MONTHLY_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-          <Button type="button" variant="secondary" onClick={generateFromAnnualPlan}>
-            Generate from Annual Plan
-          </Button>
-          <Button type="button" variant="outline" onClick={() => void Promise.all([loadWorkspace(), loadAudit()])}>
-            Refresh
-          </Button>
-          {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+    <div className="space-y-6">
+      <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-[-0.02em] text-[#0f1321]">Monthly Planning</h1>
+          <p className="text-lg md:text-xl text-[#71768b]">Manage your monthly budget and track payments</p>
         </div>
 
-        {workspace ? (
-          <div className="grid gap-3 md:grid-cols-4">
-            <SummaryCard
-              title="Income"
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          <div className="inline-flex h-12 items-center rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] p-1">
+            <button
+              type="button"
+              className="grid h-10 w-10 place-items-center rounded-xl text-[#1a1e2a] hover:bg-[#e4e7ed]"
+              onClick={() => shiftMonth(-1)}
+            >
+              <ChevronLeftIcon size={20} />
+            </button>
+
+            <select
+              className="h-10 min-w-[170px] rounded-xl bg-[#e8eaee] px-3 text-lg text-[#1c202c]"
+              value={month}
+              onChange={(event) => setMonth(Number.parseInt(event.target.value, 10))}
+            >
+              {MONTH_LABELS.map((label, index) => (
+                <option key={label} value={index + 1}>
+                  {label}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="ml-2 h-10 min-w-[110px] rounded-xl bg-[#e8eaee] px-3 text-lg text-[#1c202c]"
+              value={year}
+              onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
+            >
+              {Array.from({ length: 9 }).map((_, index) => {
+                const optionYear = now.getFullYear() - 3 + index;
+                return (
+                  <option key={optionYear} value={optionYear}>
+                    {optionYear}
+                  </option>
+                );
+              })}
+            </select>
+
+            <button
+              type="button"
+              className="ml-2 grid h-10 w-10 place-items-center rounded-xl text-[#1a1e2a] hover:bg-[#e4e7ed]"
+              onClick={() => shiftMonth(1)}
+            >
+              <ChevronRightIcon size={20} />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl border border-[#d1d5dd] bg-[#f3f4f6] px-4 text-sm md:text-base text-[#171b27] hover:bg-[#e9ebf0]"
+            onClick={() => void generateFromAnnualPlan()}
+          >
+            <CopyIcon size={20} />
+            Copy from Annual
+          </button>
+
+          <button
+            type="button"
+            className="inline-flex h-12 items-center gap-2 rounded-2xl bg-[#040426] px-5 text-sm md:text-base text-white hover:opacity-95 disabled:opacity-60"
+            onClick={() => void saveAllActions()}
+            disabled={!workspace || saving || loading}
+          >
+            <SaveIcon size={20} />
+            {saving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </header>
+
+      {message ? <p className="text-sm md:text-base text-[#686e84]">{message}</p> : null}
+      {loading ? <p className="text-sm md:text-base text-[#686e84]">Loading monthly plan...</p> : null}
+
+      {workspace ? (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MonthlyMetricCard
+              label="INCOME"
               planned={workspace.summary.incomePlanned}
               actual={workspace.summary.incomeActual}
+              valueTone="text-[#10a34a]"
             />
-            <SummaryCard title="Costs" planned={workspace.summary.costsPlanned} actual={workspace.summary.costsActual} />
-            <SummaryCard
-              title="Savings / Invest"
+            <MonthlyMetricCard
+              label="BUSINESS COSTS"
+              planned={monthlySplit.businessCostsPlanned}
+              actual={monthlySplit.businessCostsActual}
+              valueTone="text-[#8f30ff]"
+            />
+            <MonthlyMetricCard
+              label="PERSONAL COSTS"
+              planned={monthlySplit.personalCostsPlanned}
+              actual={monthlySplit.personalCostsActual}
+              valueTone="text-[#f35b00]"
+            />
+            <MonthlyMetricCard
+              label="SAVINGS / INVEST"
               planned={workspace.summary.savingsPlanned}
               actual={workspace.summary.savingsActual}
+              valueTone="text-[#2563eb]"
             />
-            <SummaryCard
-              title="Remainder"
+            <MonthlyMetricCard
+              label="REMAINDER"
               planned={workspace.summary.remainderPlanned}
               actual={workspace.summary.remainderActual}
+              valueTone="text-[#e11d48]"
+              danger
             />
-          </div>
-        ) : null}
+          </section>
 
-        {workspace ? (
-          <div className="rounded-md border bg-background p-3 text-sm">
-            Completion: {workspace.completion.done} done, {workspace.completion.partial} partial, {workspace.completion.skipped} skipped, {workspace.completion.planned} planned ({workspace.completion.total} total)
-          </div>
-        ) : null}
-
-        {loading ? <p className="text-sm text-muted-foreground">Loading monthly workspace...</p> : null}
-
-        {!loading ? (
-          <div className="overflow-x-auto pb-1">
-            <table className="w-max min-w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="min-w-[170px] border px-2 py-2 text-left">Category</th>
-                  <th className="min-w-[180px] border px-2 py-2 text-left">Section</th>
-                  <th className="min-w-[140px] border px-2 py-2 text-right whitespace-nowrap">Planned</th>
-                  <th className="w-[120px] min-w-[120px] border px-2 py-2 text-right whitespace-nowrap">Actual</th>
-                  <th className="min-w-[130px] border px-2 py-2 text-left">Status</th>
-                  <th className="min-w-[190px] border px-2 py-2 text-left">Updated</th>
-                  <th className="min-w-[95px] border px-2 py-2 text-left">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {actions.map((action) => (
-                  <tr key={action.actionId}>
-                    <td className="border px-2 py-2 whitespace-nowrap">{action.categoryName}</td>
-                    <td className="border px-2 py-2 whitespace-nowrap">{action.section}</td>
-                    <td className="border px-2 py-2 text-right tabular-nums whitespace-nowrap">
-                      {asCurrency(action.plannedAmount)}
-                    </td>
-                    <td className="w-[120px] min-w-[120px] border px-2 py-2">
-                      <Input
-                        type="number"
-                        step="0.01"
-                        className="numeric-input h-8 min-w-[112px] px-2 text-right text-sm tabular-nums"
-                        value={action.actualAmount ?? ""}
-                        onChange={(event) => {
-                          const parsed = Number.parseFloat(event.target.value);
-                          updateDraft(action.actionId, {
-                            actualAmount: Number.isFinite(parsed) ? parsed : null
-                          });
-                        }}
-                      />
-                    </td>
-                    <td className="border px-2 py-2">
-                      <select
-                        className="h-8 rounded-md border px-2 text-sm"
-                        value={action.status}
-                        onChange={(event) => {
-                          updateDraft(action.actionId, {
-                            status: event.target.value as ActionStatus
-                          });
-                        }}
-                      >
-                        {MONTHLY_STATUSES.filter((status) => status !== "ALL").map((status) => (
-                          <option key={`${action.actionId}-${status}`} value={status}>
-                            {status}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="border px-2 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(action.updatedAt).toLocaleString()}
-                    </td>
-                    <td className="border px-2 py-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => void saveAction(action.actionId)}
-                        disabled={savingActionId === action.actionId}
-                      >
-                        {savingActionId === action.actionId ? "Saving..." : "Save"}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        <div className="space-y-2 rounded-md border bg-background p-3">
-          <h3 className="text-sm font-semibold">Recent Audit Trail</h3>
-          {auditEntries.length === 0 ? <p className="text-sm text-muted-foreground">No recent changes.</p> : null}
-          {auditEntries.map((entry) => (
-            <div key={entry.id} className="rounded border p-2 text-xs">
-              <p className="font-medium">
-                {entry.eventType} on {entry.entityType}
+          <section className="overflow-hidden rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9]">
+            <div className="border-b border-[#d5d9e0] p-6 md:p-8">
+              <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">
+                Budget Items for {MONTH_LABELS[month - 1]} {year}
+              </h2>
+              <p className="mt-2 text-base md:text-lg text-[#73788d]">
+                Manage budgeted amounts, track actual spending, and update payment status
               </p>
-              <p className="text-muted-foreground">
-                {new Date(entry.changedAt).toLocaleString()} by {entry.changedBy}
-              </p>
-              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px]">{entry.payload}</pre>
             </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+
+            <div className="overflow-x-auto">
+              <table className="w-max min-w-full border-collapse">
+                <thead>
+                  <tr className="bg-[#eceef2]">
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Section</th>
+                    <th className="border-b border-[#cdd2da] px-4 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Category</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Budgeted</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Actual</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Difference</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-center text-sm md:text-base font-semibold text-[#171b25]">Status</th>
+                    <th className="border-b border-[#cdd2da] px-3 py-4 text-left text-sm md:text-base font-semibold text-[#171b25]">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupedRows.map((group) => (
+                    group.rows.map(({ row }, index) => {
+                      const actual = row.actualAmount ?? 0;
+                      const difference = actual - row.plannedAmount;
+
+                      return (
+                        <tr key={row.actionId} className={sectionRowTone(group.group)}>
+                          {index === 0 ? (
+                            <td
+                              rowSpan={group.rows.length}
+                              className="border-b border-[#cad0d8] px-4 py-4 align-top text-lg md:text-xl text-[#1b1f2b]"
+                            >
+                              {group.label}
+                            </td>
+                          ) : null}
+
+                          <td className="border-b border-[#cad0d8] px-4 py-4 text-lg md:text-xl text-[#1b1f2b]">{row.categoryName}</td>
+
+                          <td className="border-b border-[#cad0d8] px-3 py-3">
+                            <div className="grid h-11 min-w-[108px] place-items-center rounded-xl bg-[#eff1f4] text-sm md:text-base font-medium text-[#1f2430]">
+                              {row.plannedAmount}
+                            </div>
+                          </td>
+
+                          <td className="border-b border-[#cad0d8] px-3 py-3">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="numeric-input h-11 min-w-[108px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm md:text-base font-medium text-[#1f2430] shadow-none"
+                              value={row.actualAmount ?? ""}
+                              onChange={(event) => {
+                                const parsed = Number.parseFloat(event.target.value);
+                                updateDraft(row.actionId, {
+                                  actualAmount: Number.isFinite(parsed) ? parsed : null
+                                });
+                              }}
+                            />
+                          </td>
+
+                          <td className={`border-b border-[#cad0d8] px-3 py-3 text-center text-base md:text-lg ${differenceTone(row.section, difference)}`}>
+                            {difference === 0 ? "-" : asSignedCurrency(difference)}
+                          </td>
+
+                          <td className="border-b border-[#cad0d8] px-3 py-3">
+                            <select
+                              className="h-11 min-w-[160px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm md:text-base text-[#1f2430]"
+                              value={row.status}
+                              onChange={(event) =>
+                                updateDraft(row.actionId, {
+                                  status: event.target.value as ActionStatus
+                                })
+                              }
+                            >
+                              {Object.entries(STATUS_LABELS).map(([status, label]) => (
+                                <option key={`${row.actionId}-${status}`} value={status}>
+                                  {label}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+
+                          <td className="border-b border-[#cad0d8] px-3 py-3">
+                            <Input
+                              value={notes[row.actionId] ?? ""}
+                              onChange={(event) =>
+                                setNotes((current) => ({
+                                  ...current,
+                                  [row.actionId]: event.target.value
+                                }))
+                              }
+                              placeholder="Add notes..."
+                              className="h-11 min-w-[180px] rounded-xl border-0 bg-[#eff1f4] text-sm md:text-base text-[#6d7287] shadow-none"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-6 md:p-8">
+            <h2 className="text-2xl md:text-3xl font-medium text-[#171a24]">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
+
+            <div className="mt-6 grid gap-8 xl:grid-cols-2">
+              <SummaryColumn
+                label="BUDGETED"
+                income={workspace.summary.incomePlanned}
+                business={monthlySplit.businessCostsPlanned}
+                personal={monthlySplit.personalCostsPlanned}
+                savings={workspace.summary.savingsPlanned}
+                remainder={workspace.summary.remainderPlanned}
+              />
+              <SummaryColumn
+                label="ACTUAL"
+                income={workspace.summary.incomeActual}
+                business={monthlySplit.businessCostsActual}
+                personal={monthlySplit.personalCostsActual}
+                savings={workspace.summary.savingsActual}
+                remainder={workspace.summary.remainderActual}
+              />
+            </div>
+          </section>
+        </>
+      ) : null}
+    </div>
   );
 }
 
-function SummaryCard({ title, planned, actual }: { title: string; planned: number; actual: number }) {
+function MonthlyMetricCard({
+  label,
+  planned,
+  actual,
+  valueTone,
+  danger = false
+}: {
+  label: string;
+  planned: number;
+  actual: number;
+  valueTone: string;
+  danger?: boolean;
+}) {
   return (
-    <div className="rounded-md border bg-background p-3">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{title}</p>
-      <p className="text-sm">Planned: {asCurrency(planned)}</p>
-      <p className="text-sm font-semibold">Actual: {asCurrency(actual)}</p>
+    <div
+      className={`rounded-[20px] border bg-[#f6f7f9] p-6 ${danger ? "border-[#f43f5e]" : "border-[#cfd3da]"}`}
+    >
+      <p className="text-sm md:text-base tracking-wide text-[#72778b]">{label}</p>
+      <p className={`mt-2 text-3xl md:text-4xl font-medium ${valueTone}`}>{asCurrency(planned)}</p>
+      <p className="mt-1 text-sm md:text-base text-[#72778b]">
+        Actual: <span className={valueTone}>{asCurrency(actual)}</span>
+      </p>
+    </div>
+  );
+}
+
+function SummaryColumn({
+  label,
+  income,
+  business,
+  personal,
+  savings,
+  remainder
+}: {
+  label: string;
+  income: number;
+  business: number;
+  personal: number;
+  savings: number;
+  remainder: number;
+}) {
+  const transfer = income - business;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm md:text-base tracking-wide text-[#72778b]">{label}</p>
+
+      <SummaryLine label="Total Business Income" value={income} valueTone="text-[#10a34a]" />
+      <SummaryLine label="- Business Expenses" value={-business} valueTone="text-[#8f30ff]" />
+
+      <div className="border-t border-[#d7dbe2]" />
+
+      <SummaryLine label="Transfer to Personal" value={transfer} valueTone="text-[#10a34a]" />
+      <SummaryLine label="- Personal Expenses" value={-personal} valueTone="text-[#f35b00]" />
+      <SummaryLine label="- Savings" value={-savings} valueTone="text-[#2563eb]" />
+
+      <div className="border-t border-[#d7dbe2]" />
+
+      <SummaryLine label="Remainder" value={remainder} valueTone={remainder >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"} />
+    </div>
+  );
+}
+
+function SummaryLine({
+  label,
+  value,
+  valueTone
+}: {
+  label: string;
+  value: number;
+  valueTone: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 text-lg md:text-xl">
+      <p className="text-[#6f7489]">{label}</p>
+      <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>
   );
 }
