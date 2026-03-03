@@ -226,6 +226,14 @@ export function MonthlyWorkspace() {
     setLoading(true);
     setMessage(null);
 
+    const syncResponse = await fetch(`/api/budget/months/${year}/${month}/generate`, {
+      method: "POST"
+    });
+
+    if (!syncResponse.ok && redirectToLoginIfUnauthorized(syncResponse.status)) {
+      return;
+    }
+
     const response = await fetch(`/api/budget/months/${year}/${month}?status=ALL`, {
       method: "GET",
       cache: "no-store"
