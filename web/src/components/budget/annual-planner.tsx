@@ -475,6 +475,24 @@ export function AnnualPlanner() {
     };
   }, [rowsWithMeta]);
 
+  const monthlyRemainders = useMemo(() => {
+    const incomeByMonth = Array<number>(MONTH_LABELS.length).fill(0);
+    const allocatedByMonth = Array<number>(MONTH_LABELS.length).fill(0);
+
+    for (const row of rowsWithMeta) {
+      row.months.forEach((monthValue, monthIndex) => {
+        if (row.resolvedSection.kind === "INCOME") {
+          incomeByMonth[monthIndex] += monthValue;
+          return;
+        }
+
+        allocatedByMonth[monthIndex] += monthValue;
+      });
+    }
+
+    return incomeByMonth.map((incomeValue, monthIndex) => incomeValue - allocatedByMonth[monthIndex]);
+  }, [rowsWithMeta]);
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -683,6 +701,26 @@ export function AnnualPlanner() {
                       )}
                     </Fragment>
                   ))}
+
+                  <tr className="bg-[#eceef2]">
+                    <td className="sticky left-0 z-30 min-w-[170px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base">
+                      Summary
+                    </td>
+                    <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base">
+                      Monthly Remainder
+                    </td>
+                    <td className="sticky left-[420px] z-20 w-[74px] min-w-[74px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3" />
+                    {monthlyRemainders.map((monthValue, monthIndex) => (
+                      <td
+                        key={`monthly-remainder-${monthIndex + 1}`}
+                        className={`border-b border-[#cdd2da] px-2 py-3 text-center text-sm font-medium md:text-base ${
+                          monthValue >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"
+                        }`}
+                      >
+                        {asSignedCurrency(monthValue)}
+                      </td>
+                    ))}
+                  </tr>
                 </tbody>
               </table>
             </div>

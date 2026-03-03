@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
-import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
+import { ChevronLeftIcon, ChevronRightIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import {
   asCurrency,
   asSignedCurrency,
@@ -25,7 +25,6 @@ import {
   readHiddenMonthlyApiRows,
   readMonthlyCustomItems,
   readNameOverrides,
-  saveAnnualCustomItems,
   saveHiddenMonthlyApiRows,
   saveMonthlyCustomItems,
   saveNameOverrides,
@@ -36,10 +35,9 @@ import {
 
 type MonthlyDisplayRow = {
   rowId: string;
-  source: "api" | "annualCustom" | "monthlyCustom";
+  source: "api" | "monthlyCustom";
   actionId?: string;
   categoryId?: string;
-  annualCustomId?: string;
   monthlyCustomId?: string;
   name: string;
   section: "INCOME" | "COSTS" | "SAVINGS_INVESTMENTS";
@@ -136,6 +134,69 @@ function rowMatchKey(name: string, sectionId: string, sectionKind: ManagedSectio
   return `${fallbackSectionId}::${sectionKind}::${normalizedName}`;
 }
 
+function mergeMonthlyCustomRowsFromAnnual(
+  annualItems: AnnualCustomItem[],
+  monthlyItems: MonthlyCustomItem[],
+  year: number,
+  month: number,
+  sectionSettings: ManagedSection[]
+): { items: MonthlyCustomItem[]; added: number; updated: number } {
+  const annualForYear = annualItems.filter((item) => item.year === year);
+  if (annualForYear.length === 0) {
+    return { items: monthlyItems, added: 0, updated: 0 };
+  }
+
+  const next = [...monthlyItems];
+  let added = 0;
+  let updated = 0;
+
+  for (const annualItem of annualForYear) {
+    const resolvedAnnual = resolveCustomSection(annualItem, sectionSettings);
+    const annualKey = rowMatchKey(annualItem.name, resolvedAnnual.sectionId, resolvedAnnual.kind);
+    const annualPlanned = annualItem.months[month - 1] ?? 0;
+
+    const existingIndex = next.findIndex((monthlyItem) => {
+      if (monthlyItem.year !== year || monthlyItem.month !== month) {
+        return false;
+      }
+
+      const resolvedMonthly = resolveCustomSection(monthlyItem, sectionSettings);
+      const monthlyKey = rowMatchKey(monthlyItem.name, resolvedMonthly.sectionId, resolvedMonthly.kind);
+      return monthlyKey === annualKey;
+    });
+
+    if (existingIndex >= 0) {
+      const existing = next[existingIndex];
+      if (existing.plannedAmount !== annualPlanned) {
+        next[existingIndex] = {
+          ...existing,
+          plannedAmount: annualPlanned
+        };
+        updated += 1;
+      }
+      continue;
+    }
+
+    const draft = createMonthlyCustomDraft(
+      year,
+      month,
+      resolvedAnnual.sectionId || annualItem.sectionId,
+      resolvedAnnual.kind
+    );
+
+    next.push({
+      ...draft,
+      name: annualItem.name,
+      sectionId: resolvedAnnual.sectionId || annualItem.sectionId,
+      sectionKind: resolvedAnnual.kind,
+      plannedAmount: annualPlanned
+    });
+    added += 1;
+  }
+
+  return { items: next, added, updated };
+}
+
 export function MonthlyWorkspace() {
   const now = new Date();
   useCurrencySetting();
@@ -148,7 +209,6 @@ export function MonthlyWorkspace() {
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -210,15 +270,26 @@ export function MonthlyWorkspace() {
     };
   }, []);
 
+  useEffect(() => {
+    const merged = mergeMonthlyCustomRowsFromAnnual(
+      annualCustomItems,
+      monthlyCustomItems,
+      year,
+      month,
+      sectionSettings
+    );
+
+    if (merged.added === 0 && merged.updated === 0) {
+      return;
+    }
+
+    const saved = saveMonthlyCustomItems(merged.items);
+    setMonthlyCustomItems(saved);
+  }, [annualCustomItems, month, monthlyCustomItems, sectionSettings, year]);
+
   const rowsWithMeta = useMemo(() => {
     const rows: MonthlyDisplayRow[] = [];
     const monthlyForCurrentPeriod = monthlyCustomItems.filter((item) => item.year === year && item.month === month);
-    const monthlyKeys = new Set(
-      monthlyForCurrentPeriod.map((item) => {
-        const resolved = resolveCustomSection(item, sectionSettings);
-        return rowMatchKey(item.name, resolved.sectionId, resolved.kind);
-      })
-    );
 
     for (const row of workspace?.actions ?? []) {
       if (hiddenApiRows.includes(row.actionId)) {
@@ -248,26 +319,6 @@ export function MonthlyWorkspace() {
       });
     }
 
-    for (const item of annualCustomItems.filter((item) => item.year === year)) {
-      const resolved = resolveCustomSection(item, sectionSettings);
-      const annualKey = rowMatchKey(item.name, resolved.sectionId, resolved.kind);
-      if (monthlyKeys.has(annualKey)) {
-        continue;
-      }
-
-      rows.push({
-        rowId: `annual-custom-${item.id}`,
-        source: "annualCustom",
-        annualCustomId: item.id,
-        name: item.name,
-        section: sectionFromKind(resolved.kind),
-        plannedAmount: item.months[month - 1] ?? 0,
-        actualAmount: null,
-        status: "PLANNED",
-        resolvedSection: resolved
-      });
-    }
-
     for (const item of monthlyForCurrentPeriod) {
       const resolved = resolveCustomSection(item, sectionSettings);
 
@@ -285,7 +336,7 @@ export function MonthlyWorkspace() {
     }
 
     return rows;
-  }, [annualCustomItems, hiddenApiRows, month, monthlyCustomItems, nameOverrides, sectionSettings, workspace?.actions, year]);
+  }, [hiddenApiRows, month, monthlyCustomItems, nameOverrides, sectionSettings, workspace?.actions, year]);
 
   const groupedRows = useMemo(() => {
     const groupedMap = new Map<
@@ -368,68 +419,6 @@ export function MonthlyWorkspace() {
     setMonthlyCustomItems(saveMonthlyCustomItems(next));
   }
 
-  function syncMonthlyCustomRowsFromAnnual(): { added: number; updated: number } {
-    const annualForYear = annualCustomItems.filter((item) => item.year === year);
-    if (annualForYear.length === 0) {
-      return { added: 0, updated: 0 };
-    }
-
-    const next = [...monthlyCustomItems];
-    let added = 0;
-    let updated = 0;
-
-    for (const annualItem of annualForYear) {
-      const resolvedAnnual = resolveCustomSection(annualItem, sectionSettings);
-      const annualKey = rowMatchKey(annualItem.name, resolvedAnnual.sectionId, resolvedAnnual.kind);
-      const annualPlanned = annualItem.months[month - 1] ?? 0;
-
-      const existingIndex = next.findIndex((monthlyItem) => {
-        if (monthlyItem.year !== year || monthlyItem.month !== month) {
-          return false;
-        }
-
-        const resolvedMonthly = resolveCustomSection(monthlyItem, sectionSettings);
-        const monthlyKey = rowMatchKey(monthlyItem.name, resolvedMonthly.sectionId, resolvedMonthly.kind);
-        return monthlyKey === annualKey;
-      });
-
-      if (existingIndex >= 0) {
-        const existing = next[existingIndex];
-        if (existing.plannedAmount !== annualPlanned) {
-          next[existingIndex] = {
-            ...existing,
-            plannedAmount: annualPlanned
-          };
-          updated += 1;
-        }
-
-        continue;
-      }
-
-      const draft = createMonthlyCustomDraft(
-        year,
-        month,
-        resolvedAnnual.sectionId || annualItem.sectionId,
-        resolvedAnnual.kind
-      );
-
-      next.push({
-        ...draft,
-        name: annualItem.name,
-        sectionId: resolvedAnnual.sectionId || annualItem.sectionId,
-        sectionKind: resolvedAnnual.kind,
-        plannedAmount: annualPlanned
-      });
-      added += 1;
-    }
-
-    if (added > 0 || updated > 0) {
-      setMonthlyCustomItems(saveMonthlyCustomItems(next));
-    }
-
-    return { added, updated };
-  }
-
   function removeRow(row: MonthlyDisplayRow) {
     if (row.source === "api" && row.actionId) {
       const next = saveHiddenMonthlyApiRows([...hiddenApiRows, row.actionId]);
@@ -441,11 +430,6 @@ export function MonthlyWorkspace() {
       const next = monthlyCustomItems.filter((item) => item.id !== row.monthlyCustomId);
       setMonthlyCustomItems(saveMonthlyCustomItems(next));
       return;
-    }
-
-    if (row.source === "annualCustom" && row.annualCustomId) {
-      const next = annualCustomItems.filter((item) => item.id !== row.annualCustomId);
-      setAnnualCustomItems(saveAnnualCustomItems(next));
     }
   }
 
@@ -473,19 +457,6 @@ export function MonthlyWorkspace() {
 
       setMonthlyCustomItems(saveMonthlyCustomItems(next));
       return;
-    }
-
-    if (row.source === "annualCustom" && row.annualCustomId) {
-      const next = annualCustomItems.map((item) =>
-        item.id === row.annualCustomId
-          ? {
-              ...item,
-              name: nextName
-            }
-          : item
-      );
-
-      setAnnualCustomItems(saveAnnualCustomItems(next));
     }
   }
 
@@ -527,38 +498,6 @@ export function MonthlyWorkspace() {
     setSaving(false);
     setMessage(`Saved ${completed} monthly items.`);
     await loadWorkspace();
-  }
-
-  async function generateFromAnnualPlan() {
-    setSaving(true);
-    setMessage(null);
-
-    const response = await fetch(`/api/budget/months/${year}/${month}/generate`, {
-      method: "POST"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setMessage("Failed to copy budget from annual plan.");
-      setSaving(false);
-      return;
-    }
-
-    const mergedCustom = syncMonthlyCustomRowsFromAnnual();
-    await loadWorkspace();
-    setSaving(false);
-
-    if (mergedCustom.added > 0 || mergedCustom.updated > 0) {
-      setMessage(
-        `Copied budget from annual plan. Custom rows: ${mergedCustom.added} added, ${mergedCustom.updated} updated.`
-      );
-      return;
-    }
-
-    setMessage("Copied budget values from annual plan.");
   }
 
   function shiftMonth(direction: -1 | 1) {
@@ -687,16 +626,6 @@ export function MonthlyWorkspace() {
 
           <button
             type="button"
-            className="ui-btn-secondary ui-border ui-hover-soft inline-flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm md:text-base"
-            onClick={() => void generateFromAnnualPlan()}
-            disabled={saving || loading}
-          >
-            <CopyIcon size={20} />
-            Copy from Annual
-          </button>
-
-          <button
-            type="button"
             className="ui-btn-primary inline-flex h-12 items-center gap-2 rounded-2xl px-5 text-sm disabled:opacity-60 md:text-base"
             onClick={() => void saveAllActions()}
             disabled={!workspace || saving || loading}
@@ -757,7 +686,6 @@ export function MonthlyWorkspace() {
                     <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Actual</th>
                     <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Difference</th>
                     <th className="border-b border-[#cdd2da] px-3 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">Status</th>
-                    <th className="border-b border-[#cdd2da] px-3 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -768,7 +696,7 @@ export function MonthlyWorkspace() {
                           <td className="border-b border-[#cad0d8] px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base">
                             {group.label}
                           </td>
-                          <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={6}>
+                          <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={5}>
                             <button
                               type="button"
                               onClick={() => addMonthlyRow(group.sectionId, group.kind)}
@@ -866,31 +794,25 @@ export function MonthlyWorkspace() {
                                 </td>
 
                                 <td className="border-b border-[#cad0d8] px-3 py-3">
-                                  {row.source === "annualCustom" ? (
-                                    <div className="grid h-10 min-w-[96px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
-                                      -
-                                    </div>
-                                  ) : (
-                                    <Input
-                                      type="number"
-                                      step="0.01"
-                                      className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
-                                      value={row.actualAmount ?? ""}
-                                      onChange={(event) => {
-                                        const parsed = Number.parseFloat(event.target.value);
-                                        const nextActual = Number.isFinite(parsed) ? parsed : null;
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                    value={row.actualAmount ?? ""}
+                                    onChange={(event) => {
+                                      const parsed = Number.parseFloat(event.target.value);
+                                      const nextActual = Number.isFinite(parsed) ? parsed : null;
 
-                                        if (row.source === "api" && row.actionId) {
-                                          updateApiRow(row.actionId, { actualAmount: nextActual });
-                                          return;
-                                        }
+                                      if (row.source === "api" && row.actionId) {
+                                        updateApiRow(row.actionId, { actualAmount: nextActual });
+                                        return;
+                                      }
 
-                                        if (row.source === "monthlyCustom" && row.monthlyCustomId) {
-                                          updateMonthlyCustomRow(row.monthlyCustomId, { actualAmount: nextActual });
-                                        }
-                                      }}
-                                    />
-                                  )}
+                                      if (row.source === "monthlyCustom" && row.monthlyCustomId) {
+                                        updateMonthlyCustomRow(row.monthlyCustomId, { actualAmount: nextActual });
+                                      }
+                                    }}
+                                  />
                                 </td>
 
                                 <td
@@ -902,57 +824,37 @@ export function MonthlyWorkspace() {
                                 </td>
 
                                 <td className="border-b border-[#cad0d8] px-3 py-3">
-                                  {row.source === "annualCustom" ? (
-                                    <div className="grid h-10 min-w-[140px] place-items-center rounded-xl bg-[#eff1f4] text-sm text-[#76809a] md:text-base">
-                                      From annual
-                                    </div>
-                                  ) : (
-                                    <select
-                                      className="h-10 min-w-[140px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm text-[#1f2430] md:text-base"
-                                      value={row.status}
-                                      onChange={(event) => {
-                                        if (row.source === "api" && row.actionId) {
-                                          updateApiRow(row.actionId, {
-                                            status: event.target.value as ActionStatus
-                                          });
-                                          return;
-                                        }
+                                  <select
+                                    className="h-10 min-w-[140px] rounded-xl border-0 bg-[#eff1f4] px-3 text-sm text-[#1f2430] md:text-base"
+                                    value={row.status}
+                                    onChange={(event) => {
+                                      if (row.source === "api" && row.actionId) {
+                                        updateApiRow(row.actionId, {
+                                          status: event.target.value as ActionStatus
+                                        });
+                                        return;
+                                      }
 
-                                        if (row.source === "monthlyCustom" && row.monthlyCustomId) {
-                                          updateMonthlyCustomRow(row.monthlyCustomId, {
-                                            status: event.target.value as ActionStatus
-                                          });
-                                        }
-                                      }}
-                                    >
-                                      {Object.entries(STATUS_LABELS).map(([status, label]) => (
-                                        <option key={`${row.rowId}-${status}`} value={status}>
-                                          {label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  )}
-                                </td>
-
-                                <td className="border-b border-[#cad0d8] px-3 py-3">
-                                  <Input
-                                    value={notes[row.rowId] ?? ""}
-                                    onChange={(event) =>
-                                      setNotes((current) => ({
-                                        ...current,
-                                        [row.rowId]: event.target.value
-                                      }))
-                                    }
-                                    placeholder="Add notes..."
-                                    className="h-10 min-w-[160px] rounded-xl border-0 bg-[#eff1f4] text-sm text-[#6d7287] shadow-none md:text-base"
-                                  />
+                                      if (row.source === "monthlyCustom" && row.monthlyCustomId) {
+                                        updateMonthlyCustomRow(row.monthlyCustomId, {
+                                          status: event.target.value as ActionStatus
+                                        });
+                                      }
+                                    }}
+                                  >
+                                    {Object.entries(STATUS_LABELS).map(([status, label]) => (
+                                      <option key={`${row.rowId}-${status}`} value={status}>
+                                        {label}
+                                      </option>
+                                    ))}
+                                  </select>
                                 </td>
                               </tr>
                             );
                           })}
 
                           <tr key={`${group.id}-add`} className={sectionRowTone(group.kind)}>
-                            <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={6}>
+                            <td className="border-b border-[#cad0d8] px-4 py-3" colSpan={5}>
                               <button
                                 type="button"
                                 onClick={() => addMonthlyRow(group.sectionId, group.kind)}
