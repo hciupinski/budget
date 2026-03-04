@@ -1449,7 +1449,6 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
                           onClick={() => {
                             if (isEditingGoal) {
                               cancelEditGoal();
@@ -1464,7 +1463,6 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
                           onClick={() => void markGoalDone(goal)}
                           disabled={saving || goal.progressPercent >= 100}
                         >
