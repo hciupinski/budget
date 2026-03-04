@@ -10,6 +10,7 @@ public sealed class SavingsGoal
     public decimal MonthlyContributionTarget { get; set; }
     public int? TargetYear { get; set; }
     public int? TargetMonth { get; set; }
+    public bool IsArchived { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 

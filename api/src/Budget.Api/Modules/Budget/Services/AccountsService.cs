@@ -54,6 +54,7 @@ public sealed class AccountsService(
         var savingsGoals = await dbContext.SavingsGoals
             .AsNoTracking()
             .Include(x => x.Account)
+            .Where(x => !x.IsArchived)
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
 
@@ -124,6 +125,7 @@ public sealed class AccountsService(
         var savingsGoals = await dbContext.SavingsGoals
             .AsNoTracking()
             .Include(x => x.Account)
+            .Where(x => !x.IsArchived)
             .OrderBy(x => x.Name)
             .ToListAsync(cancellationToken);
 
@@ -509,6 +511,7 @@ public sealed class AccountsService(
             MonthlyContributionTarget = decimal.Round(request.MonthlyContributionTarget, 2, MidpointRounding.AwayFromZero),
             TargetYear = request.TargetYear,
             TargetMonth = request.TargetMonth,
+            IsArchived = false,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -619,6 +622,12 @@ public sealed class AccountsService(
             changed = true;
         }
 
+        if (request.IsArchived.HasValue && goal.IsArchived != request.IsArchived.Value)
+        {
+            goal.IsArchived = request.IsArchived.Value;
+            changed = true;
+        }
+
         if (changed)
         {
             goal.UpdatedAt = now;
@@ -636,7 +645,8 @@ public sealed class AccountsService(
                     goal.CurrentAmount,
                     goal.MonthlyContributionTarget,
                     goal.TargetYear,
-                    goal.TargetMonth
+                    goal.TargetMonth,
+                    goal.IsArchived
                 })
             });
 

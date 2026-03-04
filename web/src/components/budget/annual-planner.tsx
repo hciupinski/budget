@@ -1,18 +1,16 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
-import { MONTH_LABELS, type AnnualPlanResponse } from "@/lib/budget-types";
+import { MONTH_LABELS } from "@/lib/budget-types";
 import { CalendarIcon, CopyIcon, RefreshIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import {
-  asCurrency,
   asSignedCurrency,
   sectionRowTone
 } from "@/components/budget/budget-ui-utils";
 import {
   resolveManagedSection,
   useSectionSettings,
-  type ManagedSection,
   type ManagedSectionKind
 } from "@/lib/section-settings";
 import { useCurrencySetting } from "@/lib/currency-settings";
@@ -32,6 +30,14 @@ import {
   saveOneTimeAnnualRowKeys,
   type AnnualCustomItem
 } from "@/lib/planner-custom-items";
+import { useAnnualPlannerState } from "@/components/budget/hooks/use-annual-planner-state";
+import { groupRowsBySection, resolveCustomSection } from "@/components/budget/planner-row-utils";
+import {
+  AnnualMetricCard,
+  AnnualPlannerSummaryPanel,
+  AnnualPlannerTablePanel,
+  AnnualSummaryLine
+} from "@/components/budget/annual/annual-presentational";
 
 type AnnualDisplayRow = {
   rowId: string;
@@ -65,110 +71,32 @@ function oneTimeKeyForAnnualRow(row: AnnualDisplayRow, year: number): string | n
   return null;
 }
 
-function fallbackLabelFromKind(kind: ManagedSectionKind): string {
-  if (kind === "INCOME") {
-    return "Income";
-  }
-
-  if (kind === "BUSINESS_EXPENSES") {
-    return "Business Expenses";
-  }
-
-  if (kind === "PERSONAL_EXPENSES") {
-    return "Personal Expenses";
-  }
-
-  if (kind === "SAVINGS") {
-    return "Savings";
-  }
-
-  return "Investments";
-}
-
-function resolveCustomSection(item: AnnualCustomItem, sections: ManagedSection[]) {
-  const byId = sections.find((section) => section.id === item.sectionId);
-  if (byId) {
-    return {
-      id: byId.id,
-      name: byId.name,
-      kind: byId.kind,
-      order: byId.order,
-      sectionId: byId.id
-    };
-  }
-
-  const byKind = sections.find((section) => section.kind === item.sectionKind);
-  if (byKind) {
-    return {
-      id: byKind.id,
-      name: byKind.name,
-      kind: byKind.kind,
-      order: byKind.order,
-      sectionId: byKind.id
-    };
-  }
-
-  return {
-    id: `fallback-${item.sectionKind}`,
-    name: fallbackLabelFromKind(item.sectionKind),
-    kind: item.sectionKind,
-    order: 999,
-    sectionId: ""
-  };
-}
-
 export function AnnualPlanner() {
   const now = new Date();
   useCurrencySetting();
   const sectionSettings = useSectionSettings();
-  const [year, setYear] = useState<number>(now.getFullYear());
-  const [annualPlan, setAnnualPlan] = useState<AnnualPlanResponse | null>(null);
+  const {
+    year,
+    setYear,
+    annualPlan,
+    setAnnualPlan,
+    loading,
+    saving,
+    message,
+    loadAnnualPlanData,
+    saveAnnualPlanData,
+    copyFromPreviousYear: copyFromPreviousYearData
+  } = useAnnualPlannerState(now.getFullYear());
   const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
   const [oneTimeAnnualRows, setOneTimeAnnualRows] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [saving, setSaving] = useState<boolean>(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  function redirectToLoginIfUnauthorized(statusCode: number): boolean {
-    if (statusCode === 401) {
-      window.location.assign("/login");
-      return true;
-    }
-
-    return false;
-  }
-
-  const loadAnnualPlan = useCallback(async (selectedYear: number) => {
-    setLoading(true);
-    setMessage(null);
-
-    const response = await fetch(`/api/budget/annual/${selectedYear}`, {
-      method: "GET",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setAnnualPlan(null);
-      setMessage("Unable to load annual plan.");
-      setLoading(false);
-      return;
-    }
-
-    setAnnualPlan((await response.json()) as AnnualPlanResponse);
-    setLoading(false);
-  }, []);
 
   useEffect(() => {
-    void loadAnnualPlan(year);
-  }, [loadAnnualPlan, year]);
+    void loadAnnualPlanData(year);
+  }, [loadAnnualPlanData, year]);
 
   useEffect(() => {
     function syncLocalRows() {
@@ -226,7 +154,13 @@ export function AnnualPlanner() {
         customId: item.id,
         name: item.name,
         months: item.months,
-        resolvedSection: resolveCustomSection(item, sectionSettings)
+        resolvedSection: resolveCustomSection(
+          {
+            sectionId: item.sectionId,
+            sectionKind: item.sectionKind
+          },
+          sectionSettings
+        )
       });
     }
 
@@ -234,48 +168,7 @@ export function AnnualPlanner() {
   }, [annualCustomItems, annualPlan?.categories, hiddenApiRows, nameOverrides, sectionSettings, year]);
 
   const groupedRows = useMemo(() => {
-    const groupedMap = new Map<
-      string,
-      {
-        id: string;
-        label: string;
-        kind: ManagedSectionKind;
-        order: number;
-        sectionId: string;
-        rows: AnnualDisplayRow[];
-      }
-    >();
-
-    for (const section of [...sectionSettings].sort((a, b) => a.order - b.order)) {
-      groupedMap.set(section.id, {
-        id: section.id,
-        label: section.name,
-        kind: section.kind,
-        order: section.order,
-        sectionId: section.id,
-        rows: []
-      });
-    }
-
-    for (const row of rowsWithMeta) {
-      const existing = groupedMap.get(row.resolvedSection.id);
-
-      if (existing) {
-        existing.rows.push(row);
-        continue;
-      }
-
-      groupedMap.set(row.resolvedSection.id, {
-        id: row.resolvedSection.id,
-        label: row.resolvedSection.name,
-        kind: row.resolvedSection.kind,
-        order: row.resolvedSection.order,
-        sectionId: row.resolvedSection.sectionId,
-        rows: [row]
-      });
-    }
-
-    return Array.from(groupedMap.values()).sort((a, b) => a.order - b.order);
+    return groupRowsBySection(rowsWithMeta, sectionSettings);
   }, [rowsWithMeta, sectionSettings]);
 
   function updateApiCell(categoryId: string, monthIndex: number, nextValue: number) {
@@ -429,63 +322,11 @@ export function AnnualPlanner() {
       return;
     }
 
-    setSaving(true);
-    setMessage(null);
-
-    const payload = {
-      cells: annualPlan.categories.flatMap((row) =>
-        row.months.map((plannedAmount, index) => ({
-          categoryId: row.categoryId,
-          month: index + 1,
-          plannedAmount
-        }))
-      )
-    };
-
-    const response = await fetch(`/api/budget/annual/${year}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setSaving(false);
-      setMessage("Save failed.");
-      return;
-    }
-
-    setAnnualPlan((await response.json()) as AnnualPlanResponse);
-    setSaving(false);
-    setMessage("Annual plan saved.");
+    await saveAnnualPlanData(annualPlan, year);
   }
 
   async function copyFromPreviousYear() {
-    setSaving(true);
-    setMessage(null);
-
-    const response = await fetch(`/api/budget/annual/${year}/copy-from/${year - 1}`, {
-      method: "POST"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setSaving(false);
-      setMessage(`Cannot copy from ${year - 1}.`);
-      return;
-    }
-
-    setAnnualPlan((await response.json()) as AnnualPlanResponse);
-    setSaving(false);
-    setMessage(`Copied annual plan from ${year - 1}.`);
+    await copyFromPreviousYearData(year);
   }
 
   const summary = useMemo(() => {
@@ -580,7 +421,7 @@ export function AnnualPlanner() {
           <button
             type="button"
             className="ui-btn-secondary ui-border ui-hover-soft inline-flex h-12 items-center gap-2 rounded-2xl border px-4 text-sm md:text-base"
-            onClick={() => void loadAnnualPlan(year)}
+            onClick={() => void loadAnnualPlanData(year)}
           >
             <RefreshIcon size={20} />
             Reload
@@ -608,11 +449,17 @@ export function AnnualPlanner() {
         </div>
       </header>
 
-      {message ? <p className="ui-text-muted text-sm md:text-base">{message}</p> : null}
+      {message ? (
+        <p className="ui-text-muted text-sm md:text-base">
+          {message.message}
+          {message.details ? ` ${message.details}` : ""}
+        </p>
+      ) : null}
       {loading ? <p className="ui-text-muted text-sm md:text-base">Loading annual plan...</p> : null}
 
       {annualPlan ? (
         <>
+          <AnnualPlannerTablePanel>
           <section className="ui-border ui-surface overflow-hidden rounded-[22px] border">
             <div className="max-w-full overflow-x-auto">
               <table className="w-max min-w-full border-collapse">
@@ -820,27 +667,29 @@ export function AnnualPlanner() {
               </table>
             </div>
           </section>
+          </AnnualPlannerTablePanel>
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="INCOME" value={summary.income} valueTone="text-[#10a34a]" />
-            <MetricCard label="BUSINESS COSTS" value={summary.businessCosts} valueTone="text-[#8f30ff]" />
-            <MetricCard label="PERSONAL COSTS" value={summary.personalCosts} valueTone="text-[#f35b00]" />
-            <MetricCard label="SAVINGS / INVEST" value={summary.savingsAndInvestments} valueTone="text-[#2563eb]" />
-            <MetricCard label="REMAINDER" value={summary.remainder} valueTone="text-[#e11d48]" danger />
+            <AnnualMetricCard label="INCOME" value={summary.income} valueTone="text-[#10a34a]" />
+            <AnnualMetricCard label="BUSINESS COSTS" value={summary.businessCosts} valueTone="text-[#8f30ff]" />
+            <AnnualMetricCard label="PERSONAL COSTS" value={summary.personalCosts} valueTone="text-[#f35b00]" />
+            <AnnualMetricCard label="SAVINGS / INVEST" value={summary.savingsAndInvestments} valueTone="text-[#2563eb]" />
+            <AnnualMetricCard label="REMAINDER" value={summary.remainder} valueTone="text-[#e11d48]" danger />
           </section>
 
+          <AnnualPlannerSummaryPanel>
           <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
             <h2 className="ui-text-strong text-xl font-medium md:text-2xl">Annual Money Flow Summary</h2>
 
             <div className="mt-6 space-y-4 text-sm md:text-base">
-              <SummaryLine label="Total Business Income" value={summary.income} valueTone="text-[#10a34a]" />
-              <SummaryLine label="- Business Expenses" value={-summary.businessCosts} valueTone="text-[#8f30ff]" />
+              <AnnualSummaryLine label="Total Business Income" value={summary.income} valueTone="text-[#10a34a]" />
+              <AnnualSummaryLine label="- Business Expenses" value={-summary.businessCosts} valueTone="text-[#8f30ff]" />
 
               <div className="border-t border-[#d7dbe2]" />
 
-              <SummaryLine label="Transfer to Personal" value={summary.transferToPersonal} valueTone="text-[#10a34a]" />
-              <SummaryLine label="- Personal Expenses" value={-summary.personalCosts} valueTone="text-[#f35b00]" />
-              <SummaryLine
+              <AnnualSummaryLine label="Transfer to Personal" value={summary.transferToPersonal} valueTone="text-[#10a34a]" />
+              <AnnualSummaryLine label="- Personal Expenses" value={-summary.personalCosts} valueTone="text-[#f35b00]" />
+              <AnnualSummaryLine
                 label="- Savings"
                 value={-summary.savingsAndInvestments}
                 valueTone="text-[#2563eb]"
@@ -848,9 +697,10 @@ export function AnnualPlanner() {
 
               <div className="border-t border-[#d7dbe2]" />
 
-              <SummaryLine label="Remainder (Unallocated)" value={summary.remainder} valueTone="text-[#e11d48]" />
+              <AnnualSummaryLine label="Remainder (Unallocated)" value={summary.remainder} valueTone="text-[#e11d48]" />
             </div>
           </section>
+          </AnnualPlannerSummaryPanel>
         </>
       ) : null}
 
@@ -871,42 +721,6 @@ export function AnnualPlanner() {
           </div>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  valueTone,
-  danger = false
-}: {
-  label: string;
-  value: number;
-  valueTone: string;
-  danger?: boolean;
-}) {
-  return (
-    <div className={`ui-surface rounded-[20px] border p-4 ${danger ? "border-[#f43f5e]" : "ui-border"}`}>
-      <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
-      <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(value)}</p>
-    </div>
-  );
-}
-
-function SummaryLine({
-  label,
-  value,
-  valueTone
-}: {
-  label: string;
-  value: number;
-  valueTone: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <p className="ui-text-muted">{label}</p>
-      <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>
   );
 }

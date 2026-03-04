@@ -17,7 +17,7 @@ public sealed class MarketPriceServiceTests
         using var handler = new StubHttpMessageHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(StooqCsv("123.45"), Encoding.UTF8, "text/csv")
+                Content = new StringContent(StooqCsv("123.45", "120.01"), Encoding.UTF8, "text/csv")
             }));
         using var client = new HttpClient(handler);
 
@@ -27,9 +27,11 @@ public sealed class MarketPriceServiceTests
         var second = await service.GetPriceAsync("AAPL", forceRefresh: false, CancellationToken.None);
 
         Assert.Equal(1, handler.RequestCount);
-        Assert.Equal(123.45m, first.Price);
+        Assert.Equal(123.45m, first.CurrentClosePrice);
+        Assert.Equal(120.01m, first.PreviousClosePrice);
         Assert.False(first.FromCache);
-        Assert.Equal(123.45m, second.Price);
+        Assert.Equal(123.45m, second.CurrentClosePrice);
+        Assert.Equal(120.01m, second.PreviousClosePrice);
         Assert.True(second.FromCache);
     }
 
@@ -37,12 +39,19 @@ public sealed class MarketPriceServiceTests
     public async Task GetPriceAsync_RefreshesWhenCachedValueIsStale()
     {
         using var cache = new MemoryCache(new MemoryCacheOptions());
-        cache.Set("market-price:AAPL", new MarketPriceCacheEntry(99m, DateTimeOffset.UtcNow.AddMinutes(-31)));
+        cache.Set(
+            "market-price:AAPL",
+            new MarketPriceCacheEntry(
+                CurrentClosePrice: 99m,
+                CurrentCloseAt: DateTimeOffset.UtcNow.AddMinutes(-31),
+                FetchedAtUtc: DateTimeOffset.UtcNow.AddMinutes(-31),
+                PreviousClosePrice: 95m,
+                PreviousCloseAt: DateTimeOffset.UtcNow.AddDays(-1)));
 
         using var handler = new StubHttpMessageHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(StooqCsv("150.25"), Encoding.UTF8, "text/csv")
+                Content = new StringContent(StooqCsv("150.25", "149.10"), Encoding.UTF8, "text/csv")
             }));
         using var client = new HttpClient(handler);
 
@@ -51,7 +60,7 @@ public sealed class MarketPriceServiceTests
         var result = await service.GetPriceAsync("AAPL", forceRefresh: false, CancellationToken.None);
 
         Assert.Equal(1, handler.RequestCount);
-        Assert.Equal(150.25m, result.Price);
+        Assert.Equal(150.25m, result.CurrentClosePrice);
         Assert.False(result.FromCache);
     }
 
@@ -67,7 +76,8 @@ public sealed class MarketPriceServiceTests
         var result = await service.GetPriceAsync("AAPL", forceRefresh: true, CancellationToken.None);
 
         Assert.Equal(1, handler.RequestCount);
-        Assert.Null(result.Price);
+        Assert.Null(result.CurrentClosePrice);
+        Assert.Null(result.PreviousClosePrice);
         Assert.True(result.ProviderFailed);
         Assert.False(result.FromCache);
     }
@@ -81,7 +91,7 @@ public sealed class MarketPriceServiceTests
             await Task.Delay(120, ct);
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(StooqCsv("321.10"), Encoding.UTF8, "text/csv")
+                Content = new StringContent(StooqCsv("321.10", "320.00"), Encoding.UTF8, "text/csv")
             };
         });
         using var client = new HttpClient(handler);
@@ -94,7 +104,31 @@ public sealed class MarketPriceServiceTests
         var results = await Task.WhenAll(tasks);
 
         Assert.Equal(1, handler.RequestCount);
-        Assert.All(results, item => Assert.Equal(321.10m, item.Price));
+        Assert.All(results, item =>
+        {
+            Assert.Equal(321.10m, item.CurrentClosePrice);
+            Assert.Equal(320.00m, item.PreviousClosePrice);
+        });
+    }
+
+    [Fact]
+    public async Task GetPriceAsync_WhenOnlySingleDayAvailable_PreviousCloseIsNull()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var handler = new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(StooqCsvSingle("123.45"), Encoding.UTF8, "text/csv")
+            }));
+        using var client = new HttpClient(handler);
+
+        var service = CreateService(cache, client);
+
+        var result = await service.GetPriceAsync("AAPL", forceRefresh: true, CancellationToken.None);
+
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Equal(123.45m, result.CurrentClosePrice);
+        Assert.Null(result.PreviousClosePrice);
     }
 
     private static MarketPriceService CreateService(IMemoryCache cache, HttpClient client)
@@ -113,7 +147,16 @@ public sealed class MarketPriceServiceTests
             NullLogger<MarketPriceService>.Instance);
     }
 
-    private static string StooqCsv(string close)
+    private static string StooqCsv(string currentClose, string previousClose)
+    {
+        return string.Join(
+            "\n",
+            "Symbol,Date,Time,Open,High,Low,Close,Volume",
+            $"AAPL.US,2026-03-04,17:00:00,100,100,100,{currentClose},1000",
+            $"AAPL.US,2026-03-03,17:00:00,100,100,100,{previousClose},1000");
+    }
+
+    private static string StooqCsvSingle(string close)
     {
         return $"Symbol,Date,Time,Open,High,Low,Close,Volume\nAAPL.US,2026-03-04,17:00:00,100,100,100,{close},1000";
     }

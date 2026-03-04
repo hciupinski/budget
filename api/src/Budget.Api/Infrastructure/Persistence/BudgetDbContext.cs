@@ -160,6 +160,7 @@ public sealed class BudgetDbContext(DbContextOptions<BudgetDbContext> options) :
             entity.Property(x => x.MonthlyContributionTarget).HasColumnName("monthly_contribution_target").HasPrecision(18, 2);
             entity.Property(x => x.TargetYear).HasColumnName("target_year");
             entity.Property(x => x.TargetMonth).HasColumnName("target_month");
+            entity.Property(x => x.IsArchived).HasColumnName("is_archived").IsRequired();
             entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
             entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
             entity.HasOne(x => x.Account)

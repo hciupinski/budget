@@ -124,6 +124,8 @@ export type InvestmentHolding = {
   manualPriceOverride: number | null;
   lastFetchedPrice: number;
   effectivePrice: number;
+  previousClosePrice: number | null;
+  previousCloseAt: string | null;
   currentValue: number;
   costBasis: number;
   profitLoss: number;

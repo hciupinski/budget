@@ -1,33 +1,47 @@
 "use client";
 
-import Link from "next/link";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { monthLongLabel } from "@/components/budget/budget-ui-utils";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ChevronDownIcon, ChevronRightIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import type {
   AccountKind,
-  AssetsAccountsOverviewResponse,
-  AssetsInvestmentsResponse,
   BudgetAccount,
-  InvestmentHolding
+  InvestmentHolding,
+  SavingsGoal
 } from "@/lib/budget-types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { currencyLabel, formatCurrency, type CurrencyCode, useCurrencySetting } from "@/lib/currency-settings";
+import {
+  createAccount as createAccountRequest,
+  createHolding as createHoldingRequest,
+  createSavingsGoal as createSavingsGoalRequest,
+  createTransfer as createTransferRequest,
+  refreshInvestmentPrices,
+  removeHolding as removeHoldingRequest,
+  saveSnapshots as saveSnapshotsRequest,
+  updateAccount,
+  updateSavingsGoal as updateSavingsGoalRequest,
+  updateHoldingManualPrice
+} from "@/lib/api-clients/accounts-api";
+import { useAccountsState, type AccountsSubpage } from "@/components/budget/hooks/use-accounts-state";
+import { redirectToLoginIfUnauthorized } from "@/lib/http/auth-redirect";
+import { toUserFeedback } from "@/lib/http/user-feedback";
+import { AccountsHeader } from "@/components/budget/accounts/accounts-header";
+import {
+  AccountsGeneralPanel,
+  InvestmentsPanel,
+  SavingsGoalsPanel,
+  SnapshotsPanel,
+  TransfersPanel
+} from "@/components/budget/accounts/panels";
+import { AccountsIconActionButton, AccountsStatCard } from "@/components/budget/accounts/shared";
 
 const ACCOUNT_KINDS: ReadonlyArray<{ value: AccountKind; label: string }> = [
   { value: "BANK", label: "Bank" },
   { value: "SAVINGS", label: "Savings" },
   { value: "BROKERAGE", label: "Brokerage" },
   { value: "CASH_BUCKET", label: "Cash Bucket" }
-];
-
-export type AccountsSubpage = "general" | "savings" | "investements";
-
-const ACCOUNTS_SUBPAGES: ReadonlyArray<{ value: AccountsSubpage; label: string; href: string }> = [
-  { value: "general", label: "General", href: "/accounts/general" },
-  { value: "savings", label: "Savings", href: "/accounts/savings" },
-  { value: "investements", label: "Investements", href: "/accounts/investements" }
 ];
 
 function formatDate(iso: string): string {
@@ -94,14 +108,22 @@ type HoldingAccountGroup = {
 export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpage }) {
   const now = new Date();
   const currency = useCurrencySetting();
-  const [year, setYear] = useState<number>(now.getFullYear());
-  const [month, setMonth] = useState<number>(now.getMonth() + 1);
-  const [accountsOverview, setAccountsOverview] = useState<AssetsAccountsOverviewResponse | null>(null);
-  const [investmentsData, setInvestmentsData] = useState<AssetsInvestmentsResponse | null>(null);
-  const [loadingAccounts, setLoadingAccounts] = useState<boolean>(true);
-  const [loadingInvestments, setLoadingInvestments] = useState<boolean>(false);
+  const {
+    year,
+    setYear,
+    month,
+    setMonth,
+    accountsOverview,
+    investmentsData,
+    loadingAccounts,
+    loadingInvestments,
+    message,
+    setMessage,
+    loadAccountsOverview,
+    loadInvestments,
+    refreshData
+  } = useAccountsState(now.getFullYear(), now.getMonth() + 1, subpage);
   const [saving, setSaving] = useState<boolean>(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const [newAccountName, setNewAccountName] = useState<string>("");
   const [newAccountKind, setNewAccountKind] = useState<AccountKind>("BANK");
@@ -136,6 +158,14 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
   const [goalTargetAmount, setGoalTargetAmount] = useState<string>("0");
   const [goalCurrentAmount, setGoalCurrentAmount] = useState<string>("0");
   const [goalMonthlyContribution, setGoalMonthlyContribution] = useState<string>("0");
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+  const [goalEditDraft, setGoalEditDraft] = useState<{
+    name: string;
+    accountId: string;
+    targetAmount: string;
+    currentAmount: string;
+    monthlyContributionTarget: string;
+  } | null>(null);
 
   const loading = loadingAccounts || loadingInvestments;
   const activeAccounts = useMemo(
@@ -154,91 +184,12 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
     return map;
   }, [accountsOverview?.accounts]);
 
-  function redirectToLoginIfUnauthorized(statusCode: number): boolean {
-    if (statusCode === 401) {
-      window.location.assign("/login");
-      return true;
-    }
-
-    return false;
-  }
-
-  const loadAccountsOverview = useCallback(async () => {
-    setLoadingAccounts(true);
-
-    const response = await fetch(`/api/budget/assets/accounts-overview?year=${year}&month=${month}`, {
-      method: "GET",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setMessage("Unable to load accounts data.");
-      setAccountsOverview(null);
-      setLoadingAccounts(false);
-      return;
-    }
-
-    const payload = (await response.json()) as AssetsAccountsOverviewResponse;
-    setAccountsOverview(payload);
-    setMessage(null);
-    setLoadingAccounts(false);
-
-    setSnapshotDrafts(() => {
-      const next: Record<string, { planned: string; actual: string }> = {};
-      for (const account of payload.accounts) {
-        const snapshot = payload.snapshots.find((item) => item.accountId === account.id);
-        next[account.id] = {
-          planned: String(snapshot?.plannedBalance ?? account.currentBalance),
-          actual: String(snapshot?.actualBalance ?? "")
-        };
-      }
-      return next;
-    });
-  }, [month, year]);
-
-  const loadInvestments = useCallback(async () => {
-    setLoadingInvestments(true);
-
-    const response = await fetch("/api/budget/assets/investments?refreshMode=auto", {
-      method: "GET",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setMessage("Unable to load investments data.");
-      setInvestmentsData(null);
-      setLoadingInvestments(false);
-      return;
-    }
-
-    const payload = (await response.json()) as AssetsInvestmentsResponse;
-    setInvestmentsData(payload);
-    setMessage(null);
-    setLoadingInvestments(false);
-
-    setManualPriceDrafts(() => {
-      const next: Record<string, string> = {};
-      for (const holding of payload.holdings) {
-        next[holding.id] = holding.manualPriceOverride === null ? "" : String(holding.manualPriceOverride);
-      }
-      return next;
-    });
-  }, []);
+  useEffect(() => {
+    void loadAccountsOverview(year, month);
+  }, [loadAccountsOverview, month, year]);
 
   useEffect(() => {
-    void loadAccountsOverview();
-  }, [loadAccountsOverview]);
-
-  useEffect(() => {
-    if (subpage === "investements") {
+    if (subpage === "investments") {
       void loadInvestments();
     }
   }, [loadInvestments, subpage]);
@@ -246,6 +197,38 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
   useEffect(() => {
     setNewAccountCurrency(currency);
   }, [currency]);
+
+  useEffect(() => {
+    if (!accountsOverview) {
+      return;
+    }
+
+    setSnapshotDrafts(() => {
+      const next: Record<string, { planned: string; actual: string }> = {};
+      for (const account of accountsOverview.accounts) {
+        const snapshot = accountsOverview.snapshots.find((item) => item.accountId === account.id);
+        next[account.id] = {
+          planned: String(snapshot?.plannedBalance ?? account.currentBalance),
+          actual: String(snapshot?.actualBalance ?? "")
+        };
+      }
+      return next;
+    });
+  }, [accountsOverview]);
+
+  useEffect(() => {
+    if (!investmentsData) {
+      return;
+    }
+
+    setManualPriceDrafts(() => {
+      const next: Record<string, string> = {};
+      for (const holding of investmentsData.holdings) {
+        next[holding.id] = holding.manualPriceOverride === null ? "" : String(holding.manualPriceOverride);
+      }
+      return next;
+    });
+  }, [investmentsData]);
 
   useEffect(() => {
     if (activeAccounts.length >= 2 && !transferFromId && !transferToId) {
@@ -259,23 +242,6 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
       setHoldingAccountId(brokerageAccounts[0].id);
     }
   }, [brokerageAccounts, holdingAccountId]);
-
-  const refreshData = useCallback(async () => {
-    await loadAccountsOverview();
-    if (subpage === "investements") {
-      await loadInvestments();
-    }
-  }, [loadAccountsOverview, loadInvestments, subpage]);
-
-  async function submitJson(path: string, method: "POST" | "PUT" | "PATCH", body: unknown): Promise<Response> {
-    return fetch(path, {
-      method,
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
-  }
 
   function beginEditAccount(account: BudgetAccount) {
     setEditingAccountId(account.id);
@@ -294,121 +260,113 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
 
   async function saveEditedAccount(accountId: string) {
     if (!accountEditDraft || !accountEditDraft.name.trim()) {
-      setMessage("Account name is required.");
+      setMessage({ message: "Account name is required." });
       return;
     }
 
     setSaving(true);
-    const response = await submitJson(`/api/budget/assets/accounts/${accountId}`, "PATCH", {
-      name: accountEditDraft.name.trim(),
-      kind: accountEditDraft.kind,
-      currency: accountEditDraft.currency,
-      currentBalance: toNumeric(accountEditDraft.initialAmount)
-    });
+    try {
+      await updateAccount(accountId, {
+        name: accountEditDraft.name.trim(),
+        kind: accountEditDraft.kind,
+        currency: accountEditDraft.currency,
+        currentBalance: toNumeric(accountEditDraft.initialAmount)
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      cancelEditAccount();
+      setMessage({ message: "Account updated." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      const errorBody = await response.text();
-      setMessage(errorBody || "Unable to update account.");
+      setMessage(toUserFeedback(error, "Unable to update account."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    cancelEditAccount();
-    setMessage("Account updated.");
-    setSaving(false);
-    await loadAccountsOverview();
   }
 
   async function removeAccount(accountId: string) {
     setSaving(true);
-    const response = await submitJson(`/api/budget/assets/accounts/${accountId}`, "PATCH", {
-      isArchived: true
-    });
+    try {
+      await updateAccount(accountId, {
+        isArchived: true
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      cancelEditAccount();
+      setMessage({ message: "Account removed." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      const errorBody = await response.text();
-      setMessage(errorBody || "Unable to remove account.");
+      setMessage(toUserFeedback(error, "Unable to remove account."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    cancelEditAccount();
-    setMessage("Account removed.");
-    setSaving(false);
-    await loadAccountsOverview();
   }
 
   async function createAccount() {
     if (!newAccountName.trim()) {
-      setMessage("Account name is required.");
+      setMessage({ message: "Account name is required." });
       return;
     }
 
     setSaving(true);
-    const response = await submitJson("/api/budget/assets/accounts", "POST", {
-      name: newAccountName.trim(),
-      kind: newAccountKind,
-      currency: newAccountCurrency,
-      initialBalance: toNumeric(newAccountBalance)
-    });
+    try {
+      await createAccountRequest({
+        name: newAccountName.trim(),
+        kind: newAccountKind,
+        currency: newAccountCurrency,
+        initialBalance: toNumeric(newAccountBalance)
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      setNewAccountName("");
+      setNewAccountBalance("0");
+      setMessage({ message: "Account created." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      const errorBody = await response.text();
-      setMessage(errorBody || "Unable to create account.");
+      setMessage(toUserFeedback(error, "Unable to create account."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setNewAccountName("");
-    setNewAccountBalance("0");
-    setMessage("Account created.");
-    setSaving(false);
-    await loadAccountsOverview();
   }
 
   async function createTransfer() {
     if (!transferFromId || !transferToId) {
-      setMessage("Select source and destination accounts.");
+      setMessage({ message: "Select source and destination accounts." });
       return;
     }
 
     setSaving(true);
-    const response = await submitJson("/api/budget/assets/transfers", "POST", {
-      fromAccountId: transferFromId,
-      toAccountId: transferToId,
-      amount: toNumeric(transferAmount),
-      note: transferNote.trim(),
-      transferDate: new Date().toISOString()
-    });
+    try {
+      await createTransferRequest({
+        fromAccountId: transferFromId,
+        toAccountId: transferToId,
+        amount: toNumeric(transferAmount),
+        note: transferNote.trim(),
+        transferDate: new Date().toISOString()
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      setTransferAmount("0");
+      setTransferNote("");
+      setMessage({ message: "Transfer logged." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      const errorBody = await response.text();
-      setMessage(errorBody || "Unable to log transfer.");
+      setMessage(toUserFeedback(error, "Unable to log transfer."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setTransferAmount("0");
-    setTransferNote("");
-    setMessage("Transfer logged.");
-    setSaving(false);
-    await loadAccountsOverview();
   }
 
   async function saveSnapshots() {
@@ -428,161 +386,244 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
     });
 
     setSaving(true);
-    const response = await submitJson(`/api/budget/assets/snapshots/${year}/${month}`, "PUT", {
-      snapshots
-    });
+    try {
+      await saveSnapshotsRequest(year, month, {
+        snapshots
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      setMessage({ message: "Monthly snapshots saved." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      const errorBody = await response.text();
-      setMessage(errorBody || "Unable to save snapshots.");
+      setMessage(toUserFeedback(error, "Unable to save snapshots."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setMessage("Monthly snapshots saved.");
-    setSaving(false);
-    await loadAccountsOverview();
   }
 
   async function createHolding() {
     if (!holdingAccountId || !holdingSymbol.trim()) {
-      setMessage("Select brokerage account and provide symbol.");
+      setMessage({ message: "Select brokerage account and provide symbol." });
       return;
     }
 
     setSaving(true);
-    const response = await submitJson("/api/budget/assets/holdings", "POST", {
-      accountId: holdingAccountId,
-      symbol: holdingSymbol.trim(),
-      units: toNumeric(holdingUnits),
-      averageCost: toNumeric(holdingAverageCost),
-      manualPriceOverride: holdingManualPrice.trim() === "" ? null : toNumeric(holdingManualPrice)
-    });
+    try {
+      await createHoldingRequest({
+        accountId: holdingAccountId,
+        symbol: holdingSymbol.trim(),
+        units: toNumeric(holdingUnits),
+        averageCost: toNumeric(holdingAverageCost),
+        manualPriceOverride: holdingManualPrice.trim() === "" ? null : toNumeric(holdingManualPrice)
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      setHoldingSymbol("");
+      setHoldingUnits("0");
+      setHoldingAverageCost("0");
+      setHoldingManualPrice("");
+      setMessage({ message: "Holding added." });
+      await loadInvestments();
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      const errorBody = await response.text();
-      setMessage(errorBody || "Unable to add holding.");
+      setMessage(toUserFeedback(error, "Unable to add holding."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setHoldingSymbol("");
-    setHoldingUnits("0");
-    setHoldingAverageCost("0");
-    setHoldingManualPrice("");
-    setMessage("Holding added.");
-    setSaving(false);
-    await loadInvestments();
   }
 
   async function refreshPrices() {
     setSaving(true);
-    const response = await fetch("/api/budget/assets/prices/refresh", {
-      method: "POST"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+    try {
+      await refreshInvestmentPrices();
+      setMessage({ message: "Market prices refreshed." });
+      await loadInvestments();
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      setMessage("Unable to refresh market prices.");
+      setMessage(toUserFeedback(error, "Unable to refresh market prices."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setMessage("Market prices refreshed.");
-    setSaving(false);
-    await loadInvestments();
   }
 
   async function saveManualPrice(holding: InvestmentHolding) {
     const draft = manualPriceDrafts[holding.id] ?? "";
     setSaving(true);
-    const response = await submitJson(`/api/budget/assets/holdings/${holding.id}`, "PATCH", {
-      manualPriceOverride: draft.trim() === "" ? null : toNumeric(draft),
-      clearManualPriceOverride: draft.trim() === ""
-    });
+    try {
+      await updateHoldingManualPrice(holding.id, {
+        manualPriceOverride: draft.trim() === "" ? null : toNumeric(draft),
+        clearManualPriceOverride: draft.trim() === ""
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      setMessage({ message: `Manual price updated for ${holding.symbol}.` });
+      await loadInvestments();
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      setMessage("Unable to update manual price.");
+      setMessage(toUserFeedback(error, "Unable to update manual price."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setMessage(`Manual price updated for ${holding.symbol}.`);
-    setSaving(false);
-    await loadInvestments();
   }
 
   async function removeHolding(holdingId: string) {
     setSaving(true);
-    const response = await fetch(`/api/budget/assets/holdings/${holdingId}`, {
-      method: "DELETE"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+    try {
+      await removeHoldingRequest(holdingId);
+      setMessage({ message: "Holding removed." });
+      await loadInvestments();
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      setMessage("Unable to remove holding.");
+      setMessage(toUserFeedback(error, "Unable to remove holding."));
+    } finally {
       setSaving(false);
-      return;
     }
-
-    setMessage("Holding removed.");
-    setSaving(false);
-    await loadInvestments();
   }
 
   async function createSavingsGoal() {
     if (!goalName.trim()) {
-      setMessage("Savings goal name is required.");
+      setMessage({ message: "Savings goal name is required." });
       return;
     }
 
     setSaving(true);
-    const response = await submitJson("/api/budget/assets/savings-goals", "POST", {
-      name: goalName.trim(),
-      accountId: goalAccountId || null,
-      targetAmount: toNumeric(goalTargetAmount),
-      currentAmount: toNumeric(goalCurrentAmount),
-      monthlyContributionTarget: toNumeric(goalMonthlyContribution),
-      targetYear: null,
-      targetMonth: null
-    });
+    try {
+      await createSavingsGoalRequest({
+        name: goalName.trim(),
+        accountId: goalAccountId || null,
+        targetAmount: toNumeric(goalTargetAmount),
+        currentAmount: toNumeric(goalCurrentAmount),
+        monthlyContributionTarget: toNumeric(goalMonthlyContribution),
+        targetYear: null,
+        targetMonth: null
+      });
 
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
+      setGoalName("");
+      setGoalTargetAmount("0");
+      setGoalCurrentAmount("0");
+      setGoalMonthlyContribution("0");
+      setGoalAccountId("");
+      setMessage({ message: "Savings goal created." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
         return;
       }
 
-      setMessage("Unable to create savings goal.");
+      setMessage(toUserFeedback(error, "Unable to create savings goal."));
+    } finally {
       setSaving(false);
+    }
+  }
+
+  function beginEditGoal(goal: SavingsGoal) {
+    setEditingGoalId(goal.id);
+    setGoalEditDraft({
+      name: goal.name,
+      accountId: goal.accountId ?? "",
+      targetAmount: String(goal.targetAmount),
+      currentAmount: String(goal.currentAmount),
+      monthlyContributionTarget: String(goal.monthlyContributionTarget)
+    });
+  }
+
+  function cancelEditGoal() {
+    setEditingGoalId(null);
+    setGoalEditDraft(null);
+  }
+
+  async function saveEditedGoal(goalId: string) {
+    if (!goalEditDraft || !goalEditDraft.name.trim()) {
+      setMessage({ message: "Savings goal name is required." });
       return;
     }
 
-    setGoalName("");
-    setGoalTargetAmount("0");
-    setGoalCurrentAmount("0");
-    setGoalMonthlyContribution("0");
-    setGoalAccountId("");
-    setMessage("Savings goal created.");
-    setSaving(false);
-    await loadAccountsOverview();
+    setSaving(true);
+    try {
+      await updateSavingsGoalRequest(goalId, {
+        name: goalEditDraft.name.trim(),
+        accountId: goalEditDraft.accountId || null,
+        clearAccountLink: goalEditDraft.accountId === "",
+        targetAmount: toNumeric(goalEditDraft.targetAmount),
+        currentAmount: toNumeric(goalEditDraft.currentAmount),
+        monthlyContributionTarget: toNumeric(goalEditDraft.monthlyContributionTarget)
+      });
+
+      cancelEditGoal();
+      setMessage({ message: "Savings goal updated." });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
+        return;
+      }
+
+      setMessage(toUserFeedback(error, "Unable to update savings goal."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function markGoalDone(goal: SavingsGoal) {
+    setSaving(true);
+    try {
+      await updateSavingsGoalRequest(goal.id, {
+        currentAmount: goal.targetAmount,
+        monthlyContributionTarget: 0,
+        clearAccountLink: goal.accountId !== null
+      });
+
+      if (editingGoalId === goal.id) {
+        cancelEditGoal();
+      }
+
+      setMessage({ message: `Savings goal "${goal.name}" marked as done.` });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
+        return;
+      }
+
+      setMessage(toUserFeedback(error, "Unable to mark savings goal as done."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeGoal(goal: SavingsGoal) {
+    setSaving(true);
+    try {
+      await updateSavingsGoalRequest(goal.id, {
+        isArchived: true
+      });
+
+      if (editingGoalId === goal.id) {
+        cancelEditGoal();
+      }
+
+      setMessage({ message: `Savings goal "${goal.name}" removed.` });
+      await loadAccountsOverview(year, month);
+    } catch (error) {
+      if (redirectToLoginIfUnauthorized(error)) {
+        return;
+      }
+
+      setMessage(toUserFeedback(error, "Unable to remove savings goal."));
+    } finally {
+      setSaving(false);
+    }
   }
 
   const investmentTotalsByCurrency = useMemo(() => {
@@ -692,82 +733,22 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-semibold tracking-[-0.02em] text-[#0f1321]">Accounts, Savings, and Investments</h1>
-          <p className="text-base text-[#71768b]">
-            {monthLongLabel(month)} {year} - Epic 4 workspace
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="number"
-            min={2000}
-            max={2100}
-            value={year}
-            onChange={(event) => setYear(Number(event.target.value))}
-            className="h-11 w-28"
-          />
-          <select
-            value={month}
-            onChange={(event) => setMonth(Number(event.target.value))}
-            className="h-11 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
-              <option key={value} value={value}>
-                {monthLongLabel(value)}
-              </option>
-            ))}
-          </select>
-          <Button type="button" onClick={() => void refreshData()} disabled={loading || saving}>
-            Refresh
-          </Button>
-        </div>
-      </header>
-
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label={`Net Worth (${accountsOverview?.summary.baseCurrency ?? currency})`}
-          value={asCurrencyBy(accountsOverview?.summary.netWorth ?? 0, accountsOverview?.summary.baseCurrency ?? currency)}
-        />
-        <StatCard
-          label={`Snapshot Planned (${accountsOverview?.summary.baseCurrency ?? currency})`}
-          value={asCurrencyBy(accountsOverview?.summary.snapshotPlanned ?? 0, accountsOverview?.summary.baseCurrency ?? currency)}
-        />
-        <StatCard
-          label={`Snapshot Actual (${accountsOverview?.summary.baseCurrency ?? currency})`}
-          value={asCurrencyBy(accountsOverview?.summary.snapshotActual ?? 0, accountsOverview?.summary.baseCurrency ?? currency)}
-        />
-        <StatCard
-          label="FX Pairs Used"
-          value={Object.keys(accountsOverview?.summary.exchangeRates ?? {}).sort().join(", ") || "-"}
-          tone="ui-text-muted"
-        />
-      </section>
-
-      <nav className="ui-border ui-surface flex flex-wrap gap-2 rounded-[20px] border p-2">
-        {ACCOUNTS_SUBPAGES.map((item) => (
-          <Link
-            key={item.value}
-            href={item.href}
-            className={`rounded-xl px-4 py-2 text-sm transition-colors ${
-              subpage === item.value
-                ? "bg-[#040426] text-white"
-                : "ui-text ui-hover-soft"
-            }`}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
-
-      {message ? (
-        <p className="rounded-lg border border-[#d5d9e0] bg-[#f6f7f9] px-4 py-2 text-sm text-[#1c2230]">{message}</p>
-      ) : null}
+      <AccountsHeader
+        year={year}
+        month={month}
+        loading={loading}
+        saving={saving}
+        currency={currency}
+        subpage={subpage}
+        accountsOverview={accountsOverview}
+        message={message}
+        onYearChange={setYear}
+        onMonthChange={setMonth}
+        onRefresh={() => void refreshData()}
+      />
 
       {subpage === "general" ? (
-        <>
+        <AccountsGeneralPanel>
       <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
         <h2 className="ui-text-strong text-xl md:text-2xl font-medium">Accounts</h2>
         <p className="ui-text-muted mt-2 text-sm md:text-base">Create and monitor bank, savings, brokerage, and cash buckets.</p>
@@ -964,6 +945,7 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
         </div>
       </section>
 
+      <TransfersPanel>
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
         <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Transfer Log</h2>
         <p className="mt-2 text-sm md:text-base text-[#73788d]">Log internal transfers between accounts and keep balances synchronized.</p>
@@ -1039,7 +1021,9 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
           </table>
         </div>
       </section>
+      </TransfersPanel>
 
+      <SnapshotsPanel>
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -1106,10 +1090,12 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
           </table>
         </div>
       </section>
-        </>
+      </SnapshotsPanel>
+        </AccountsGeneralPanel>
       ) : null}
 
-      {subpage === "investements" ? (
+      {subpage === "investments" ? (
+      <InvestmentsPanel>
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -1123,13 +1109,13 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           {investmentTotalsByCurrency.length === 0 ? (
-            <StatCard label="Portfolio Value" value={asCurrencyBy(0, currency)} />
+            <AccountsStatCard label="Portfolio Value" value={asCurrencyBy(0, currency)} />
           ) : (
             investmentTotalsByCurrency.map(([totalCurrency, totals]) => (
               <div key={totalCurrency} className="space-y-2">
-                <StatCard label={`Portfolio Value (${totalCurrency})`} value={asCurrencyBy(totals.value, totalCurrency)} />
-                <StatCard label={`Cost Basis (${totalCurrency})`} value={asCurrencyBy(totals.costBasis, totalCurrency)} />
-                <StatCard
+                <AccountsStatCard label={`Portfolio Value (${totalCurrency})`} value={asCurrencyBy(totals.value, totalCurrency)} />
+                <AccountsStatCard label={`Cost Basis (${totalCurrency})`} value={asCurrencyBy(totals.costBasis, totalCurrency)} />
+                <AccountsStatCard
                   label={`Profit / Loss (${totalCurrency})`}
                   value={asSignedCurrencyBy(totals.profitLoss, totalCurrency)}
                   tone={totals.profitLoss >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"}
@@ -1289,22 +1275,22 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
                                 <td className="border-b border-[#e0e4ea] px-3 py-2">
                                   {singleHolding ? (
                                     <div className="flex items-center gap-2">
-                                      <IconActionButton
+                                      <AccountsIconActionButton
                                         label="Save manual price"
                                         tone="default"
                                         onClick={() => void saveManualPrice(singleHolding)}
                                         disabled={saving}
                                       >
                                         <SaveIcon size={14} />
-                                      </IconActionButton>
-                                      <IconActionButton
+                                      </AccountsIconActionButton>
+                                      <AccountsIconActionButton
                                         label="Remove holding"
                                         tone="danger"
                                         onClick={() => void removeHolding(singleHolding.id)}
                                         disabled={saving}
                                       >
                                         <TrashIcon size={14} />
-                                      </IconActionButton>
+                                      </AccountsIconActionButton>
                                     </div>
                                   ) : (
                                     <span className="ui-text-muted text-xs">Expand for row actions</span>
@@ -1342,22 +1328,22 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
                                       </td>
                                       <td className="border-b border-[#e0e4ea] px-3 py-2">
                                         <div className="flex items-center gap-2">
-                                          <IconActionButton
+                                          <AccountsIconActionButton
                                             label="Save manual price"
                                             tone="default"
                                             onClick={() => void saveManualPrice(holding)}
                                             disabled={saving}
                                           >
                                             <SaveIcon size={14} />
-                                          </IconActionButton>
-                                          <IconActionButton
+                                          </AccountsIconActionButton>
+                                          <AccountsIconActionButton
                                             label="Remove holding"
                                             tone="danger"
                                             onClick={() => void removeHolding(holding.id)}
                                             disabled={saving}
                                           >
                                             <TrashIcon size={14} />
-                                          </IconActionButton>
+                                          </AccountsIconActionButton>
                                         </div>
                                       </td>
                                     </tr>
@@ -1374,74 +1360,256 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
           </table>
         </div>
       </section>
+      </InvestmentsPanel>
       ) : null}
 
       {subpage === "savings" ? (
+      <SavingsGoalsPanel>
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
         <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Savings Goals</h2>
         <p className="mt-2 text-sm md:text-base text-[#73788d]">Track emergency fund and long-term targets.</p>
 
-        <div className="mt-5 grid gap-2 md:grid-cols-[1fr_1fr_140px_140px_170px_auto]">
-          <Input value={goalName} onChange={(event) => setGoalName(event.target.value)} placeholder="Goal name" />
-          <select
-            value={goalAccountId}
-            onChange={(event) => setGoalAccountId(event.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            <option value="">No linked account</option>
-            {activeAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
-          <Input
-            type="number"
-            value={goalTargetAmount}
-            onChange={(event) => setGoalTargetAmount(event.target.value)}
-            placeholder="Target"
-          />
-          <Input
-            type="number"
-            value={goalCurrentAmount}
-            onChange={(event) => setGoalCurrentAmount(event.target.value)}
-            placeholder="Current"
-          />
-          <Input
-            type="number"
-            value={goalMonthlyContribution}
-            onChange={(event) => setGoalMonthlyContribution(event.target.value)}
-            placeholder="Monthly target"
-          />
-          <Button type="button" onClick={() => void createSavingsGoal()} disabled={saving}>
-            Add Goal
-          </Button>
-        </div>
+        <fieldset className="mt-5 rounded-2xl border border-[#d9dde6] bg-white/60 p-4">
+          <legend className="px-1 text-sm font-medium text-[#1f2430]">Create new goal</legend>
+          <div className="mt-2 grid gap-3 md:grid-cols-[minmax(160px,1fr)_minmax(200px,1fr)_140px_140px_220px_auto]">
+            <div className="space-y-1">
+              <Label htmlFor="new-goal-name">Goal name</Label>
+              <Input id="new-goal-name" value={goalName} onChange={(event) => setGoalName(event.target.value)} placeholder="Emergency Fund" />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="new-goal-account">Linked account (optional)</Label>
+              <select
+                id="new-goal-account"
+                value={goalAccountId}
+                onChange={(event) => setGoalAccountId(event.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">No linked account</option>
+                {activeAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="new-goal-target">Target amount</Label>
+              <Input
+                id="new-goal-target"
+                type="number"
+                value={goalTargetAmount}
+                onChange={(event) => setGoalTargetAmount(event.target.value)}
+                placeholder="10000"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="new-goal-current">Current amount</Label>
+              <Input
+                id="new-goal-current"
+                type="number"
+                value={goalCurrentAmount}
+                onChange={(event) => setGoalCurrentAmount(event.target.value)}
+                placeholder="2500"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="new-goal-monthly" className="whitespace-nowrap">Monthly contribution target</Label>
+              <Input
+                id="new-goal-monthly"
+                type="number"
+                value={goalMonthlyContribution}
+                onChange={(event) => setGoalMonthlyContribution(event.target.value)}
+                placeholder="500"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button type="button" onClick={() => void createSavingsGoal()} disabled={saving} className="w-full md:w-auto">
+                Add Goal
+              </Button>
+            </div>
+          </div>
+        </fieldset>
 
         <div className="mt-6 space-y-3">
           {(accountsOverview?.savingsGoals ?? []).map((goal) => (
             <article key={goal.id} className="ui-border ui-surface-soft rounded-[16px] border p-4">
               {(() => {
                 const goalCurrency = goal.accountId ? (accountCurrencyById.get(goal.accountId) ?? (accountsOverview?.summary.baseCurrency ?? currency)) : (accountsOverview?.summary.baseCurrency ?? currency);
+                const isEditingGoal = editingGoalId === goal.id && goalEditDraft !== null;
                 return (
                   <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="ui-text-strong text-base font-medium">{goal.name}</h3>
-                <span className="ui-text text-sm">
-                  {asCurrencyBy(goal.currentAmount, goalCurrency)} / {asCurrencyBy(goal.targetAmount, goalCurrency)}
-                </span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e6eaf1]">
-                <div
-                  className="h-full rounded-full bg-[#0ea5a2]"
-                  style={{ width: `${Math.max(0, Math.min(goal.progressPercent, 100))}%` }}
-                />
-              </div>
-              <div className="ui-text-muted mt-2 flex flex-wrap items-center gap-3 text-sm">
-                <span>{goal.progressPercent.toFixed(2)}%</span>
-                <span>Monthly target: {asCurrencyBy(goal.monthlyContributionTarget, goalCurrency)}</span>
-                <span>{goal.accountName ? `Linked: ${goal.accountName}` : "Unlinked goal"}</span>
-              </div>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="ui-text-strong text-base font-medium">{goal.name}</h3>
+                        <p className="ui-text mt-1 text-sm">
+                          {asCurrencyBy(goal.currentAmount, goalCurrency)} / {asCurrencyBy(goal.targetAmount, goalCurrency)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (isEditingGoal) {
+                              cancelEditGoal();
+                            } else {
+                              beginEditGoal(goal);
+                            }
+                          }}
+                          disabled={saving}
+                        >
+                          {isEditingGoal ? "Cancel Edit" : "Edit"}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void markGoalDone(goal)}
+                          disabled={saving || goal.progressPercent >= 100}
+                        >
+                          Mark Done
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-[#dc2626] text-[#dc2626] hover:bg-[#dc2626]/10"
+                          onClick={() => void removeGoal(goal)}
+                          disabled={saving}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+
+                    {isEditingGoal ? (
+                      <fieldset className="mt-3 rounded-xl border border-[#d9dde6] bg-white/70 p-3">
+                        <legend className="px-1 text-xs font-medium text-[#4b5568]">Edit goal</legend>
+                        <div className="mt-2 grid gap-3 md:grid-cols-[minmax(160px,1fr)_minmax(200px,1fr)_140px_140px_220px_auto_auto]">
+                          <div className="space-y-1">
+                            <Label htmlFor={`goal-name-${goal.id}`}>Goal name</Label>
+                            <Input
+                              id={`goal-name-${goal.id}`}
+                              value={goalEditDraft.name}
+                              onChange={(event) =>
+                                setGoalEditDraft((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        name: event.target.value
+                                      }
+                                    : current
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`goal-account-${goal.id}`}>Linked account (optional)</Label>
+                            <select
+                              id={`goal-account-${goal.id}`}
+                              value={goalEditDraft.accountId}
+                              onChange={(event) =>
+                                setGoalEditDraft((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        accountId: event.target.value
+                                      }
+                                    : current
+                                )
+                              }
+                              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                            >
+                              <option value="">No linked account</option>
+                              {activeAccounts.map((account) => (
+                                <option key={account.id} value={account.id}>
+                                  {account.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`goal-target-${goal.id}`}>Target amount</Label>
+                            <Input
+                              id={`goal-target-${goal.id}`}
+                              type="number"
+                              value={goalEditDraft.targetAmount}
+                              onChange={(event) =>
+                                setGoalEditDraft((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        targetAmount: event.target.value
+                                      }
+                                    : current
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`goal-current-${goal.id}`}>Current amount</Label>
+                            <Input
+                              id={`goal-current-${goal.id}`}
+                              type="number"
+                              value={goalEditDraft.currentAmount}
+                              onChange={(event) =>
+                                setGoalEditDraft((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        currentAmount: event.target.value
+                                      }
+                                    : current
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`goal-monthly-${goal.id}`} className="whitespace-nowrap">Monthly contribution target</Label>
+                            <Input
+                              id={`goal-monthly-${goal.id}`}
+                              type="number"
+                              value={goalEditDraft.monthlyContributionTarget}
+                              onChange={(event) =>
+                                setGoalEditDraft((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        monthlyContributionTarget: event.target.value
+                                      }
+                                    : current
+                                )
+                              }
+                            />
+                          </div>
+                          <div className="flex items-end">
+                            <Button type="button" size="sm" onClick={() => void saveEditedGoal(goal.id)} disabled={saving}>
+                              Save
+                            </Button>
+                          </div>
+                          <div className="flex items-end">
+                            <Button type="button" size="sm" variant="outline" onClick={cancelEditGoal} disabled={saving}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      </fieldset>
+                    ) : (
+                      <>
+                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e6eaf1]">
+                          <div
+                            className="h-full rounded-full bg-[#0ea5a2]"
+                            style={{ width: `${Math.max(0, Math.min(goal.progressPercent, 100))}%` }}
+                          />
+                        </div>
+                        <div className="ui-text-muted mt-2 flex flex-wrap items-center gap-3 text-sm">
+                          <span>{goal.progressPercent.toFixed(2)}%</span>
+                          <span>Monthly target: {asCurrencyBy(goal.monthlyContributionTarget, goalCurrency)}</span>
+                          <span>{goal.accountName ? `Linked: ${goal.accountName}` : "Unlinked goal"}</span>
+                        </div>
+                      </>
+                    )}
                   </>
                 );
               })()}
@@ -1449,51 +1617,10 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
           ))}
         </div>
       </section>
+      </SavingsGoalsPanel>
       ) : null}
 
       {loading ? <p className="text-sm text-[#6b7280]">Loading...</p> : null}
-    </div>
-  );
-}
-
-function IconActionButton({
-  children,
-  label,
-  tone,
-  onClick,
-  disabled
-}: {
-  children: ReactNode;
-  label: string;
-  tone: "default" | "danger";
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className={`h-8 w-8 rounded-md p-0 ${
-        tone === "danger"
-          ? "border-[#dc2626] text-[#dc2626] hover:bg-[#dc2626]/10"
-          : "ui-btn-secondary ui-border"
-      }`}
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-    >
-      {children}
-    </Button>
-  );
-}
-
-function StatCard({ label, value, tone = "ui-text-strong" }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="ui-border ui-surface rounded-[20px] border p-4">
-      <p className="ui-text-muted text-sm md:text-base">{label}</p>
-      <p className={`mt-1 text-xl md:text-2xl font-medium ${tone}`}>{value}</p>
     </div>
   );
 }

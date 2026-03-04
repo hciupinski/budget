@@ -368,7 +368,9 @@ public abstract class BudgetServiceBase(
     protected static InvestmentHoldingResponse ToHoldingResponse(
         InvestmentHolding holding,
         decimal? fetchedPriceOverride = null,
-        DateTimeOffset? fetchedAtOverride = null)
+        DateTimeOffset? fetchedAtOverride = null,
+        decimal? previousClosePriceOverride = null,
+        DateTimeOffset? previousCloseAtOverride = null)
     {
         var fetchedPrice = fetchedPriceOverride ?? holding.LastFetchedPrice;
         var fetchedAt = fetchedAtOverride ?? holding.LastPriceUpdatedAt;
@@ -388,6 +390,8 @@ public abstract class BudgetServiceBase(
             holding.ManualPriceOverride,
             fetchedPrice,
             effectivePrice,
+            previousClosePriceOverride,
+            previousCloseAtOverride,
             currentValue,
             costBasis,
             profitLoss,

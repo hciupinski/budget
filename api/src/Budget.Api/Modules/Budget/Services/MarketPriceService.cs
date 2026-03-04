@@ -26,7 +26,11 @@ public sealed class MarketPriceService(
         {
             if (IsFresh(cached.FetchedAtUtc))
             {
-                snapshot = new MarketPriceCacheSnapshot(cached.Price, cached.FetchedAtUtc);
+                snapshot = new MarketPriceCacheSnapshot(
+                    cached.CurrentClosePrice,
+                    cached.CurrentCloseAt,
+                    cached.PreviousClosePrice,
+                    cached.PreviousCloseAt);
                 return true;
             }
 
@@ -43,7 +47,14 @@ public sealed class MarketPriceService(
 
         if (!forceRefresh && TryGetFreshCachedPrice(normalized, out var cached) && cached is not null)
         {
-            return new MarketPriceLookupResult(normalized, cached.Price, cached.FetchedAtUtc, FromCache: true, ProviderFailed: false);
+            return new MarketPriceLookupResult(
+                normalized,
+                cached.CurrentClosePrice,
+                cached.CurrentCloseAt,
+                cached.PreviousClosePrice,
+                cached.PreviousCloseAt,
+                FromCache: true,
+                ProviderFailed: false);
         }
 
         var symbolLock = symbolLocks.GetOrAdd(normalized, _ => new SemaphoreSlim(1, 1));
@@ -53,15 +64,26 @@ public sealed class MarketPriceService(
         {
             if (!forceRefresh && TryGetFreshCachedPrice(normalized, out cached) && cached is not null)
             {
-                return new MarketPriceLookupResult(normalized, cached.Price, cached.FetchedAtUtc, FromCache: true, ProviderFailed: false);
+                return new MarketPriceLookupResult(
+                    normalized,
+                    cached.CurrentClosePrice,
+                    cached.CurrentCloseAt,
+                    cached.PreviousClosePrice,
+                    cached.PreviousCloseAt,
+                    FromCache: true,
+                    ProviderFailed: false);
             }
-
-            var fetchedAt = DateTimeOffset.UtcNow;
             var fetchResult = await FetchMarketPriceFromProviderAsync(normalized, cancellationToken);
 
-            if (fetchResult.Price.HasValue)
+            if (fetchResult.CurrentClosePrice.HasValue)
             {
-                var entry = new MarketPriceCacheEntry(fetchResult.Price.Value, fetchedAt);
+                var currentCloseAt = fetchResult.CurrentCloseAt ?? DateTimeOffset.UtcNow;
+                var entry = new MarketPriceCacheEntry(
+                    fetchResult.CurrentClosePrice.Value,
+                    currentCloseAt,
+                    DateTimeOffset.UtcNow,
+                    fetchResult.PreviousClosePrice,
+                    fetchResult.PreviousCloseAt);
                 memoryCache.Set(
                     BuildCacheKey(normalized),
                     entry,
@@ -70,10 +92,24 @@ public sealed class MarketPriceService(
                         AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(options.Value.CacheTtlMinutes)
                     });
 
-                return new MarketPriceLookupResult(normalized, fetchResult.Price.Value, fetchedAt, FromCache: false, ProviderFailed: false);
+                return new MarketPriceLookupResult(
+                    normalized,
+                    fetchResult.CurrentClosePrice.Value,
+                    currentCloseAt,
+                    fetchResult.PreviousClosePrice,
+                    fetchResult.PreviousCloseAt,
+                    FromCache: false,
+                    ProviderFailed: false);
             }
 
-            return new MarketPriceLookupResult(normalized, null, null, FromCache: false, ProviderFailed: fetchResult.ProviderFailed);
+            return new MarketPriceLookupResult(
+                normalized,
+                null,
+                null,
+                null,
+                null,
+                FromCache: false,
+                ProviderFailed: fetchResult.ProviderFailed);
         }
         finally
         {
@@ -124,29 +160,44 @@ public sealed class MarketPriceService(
         return bySymbol;
     }
 
-    private async Task<(decimal? Price, bool ProviderFailed)> FetchMarketPriceFromProviderAsync(string normalizedSymbol, CancellationToken cancellationToken)
+    private async Task<(
+        decimal? CurrentClosePrice,
+        DateTimeOffset? CurrentCloseAt,
+        decimal? PreviousClosePrice,
+        DateTimeOffset? PreviousCloseAt,
+        bool ProviderFailed)> FetchMarketPriceFromProviderAsync(string normalizedSymbol, CancellationToken cancellationToken)
     {
         try
         {
             var client = httpClientFactory.CreateClient("market-prices");
-            client.Timeout = TimeSpan.FromSeconds(options.Value.ProviderTimeoutSeconds);
-            var endpoint = $"https://stooq.com/q/l/?s={normalizedSymbol.ToLowerInvariant()}&i=d";
-            var csv = await client.GetStringAsync(endpoint, cancellationToken);
-            var parsed = ParseStooqClosePrice(csv);
-            return (parsed, ProviderFailed: false);
+            var endpoint = $"https://stooq.com/q/d/l/?s={normalizedSymbol.ToLowerInvariant()}&i=d";
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(options.Value.ProviderTimeoutSeconds));
+            var csv = await client.GetStringAsync(endpoint, timeoutCts.Token);
+            var parsed = ParseStooqCloses(csv);
+            return (
+                parsed.CurrentClosePrice,
+                parsed.CurrentCloseAt,
+                parsed.PreviousClosePrice,
+                parsed.PreviousCloseAt,
+                ProviderFailed: false);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Unable to fetch market price for symbol {Symbol}.", normalizedSymbol);
-            return (null, ProviderFailed: true);
+            return (null, null, null, null, ProviderFailed: true);
         }
     }
 
-    private static decimal? ParseStooqClosePrice(string csv)
+    private static (
+        decimal? CurrentClosePrice,
+        DateTimeOffset? CurrentCloseAt,
+        decimal? PreviousClosePrice,
+        DateTimeOffset? PreviousCloseAt) ParseStooqCloses(string csv)
     {
         if (string.IsNullOrWhiteSpace(csv))
         {
-            return null;
+            return (null, null, null, null);
         }
 
         var lines = csv
@@ -156,52 +207,85 @@ public sealed class MarketPriceService(
 
         if (lines.Length == 0)
         {
-            return null;
-        }
-
-        if (lines.Length < 2)
-        {
-            var singleRow = lines[0].Split(',', StringSplitOptions.TrimEntries);
-            if (singleRow.Length < 7)
-            {
-                return null;
-            }
-
-            var closeRaw = singleRow[6];
-            if (string.Equals(closeRaw, "N/D", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            if (!decimal.TryParse(closeRaw, NumberStyles.Number, CultureInfo.InvariantCulture, out var directClose))
-            {
-                return null;
-            }
-
-            return directClose > 0m ? decimal.Round(directClose, 4, MidpointRounding.AwayFromZero) : null;
+            return (null, null, null, null);
         }
 
         var headers = lines[0].Split(',', StringSplitOptions.TrimEntries);
-        var values = lines[1].Split(',', StringSplitOptions.TrimEntries);
+        var headerHasClose = headers.Any(header => string.Equals(header, "Close", StringComparison.OrdinalIgnoreCase));
+        var startIndex = headerHasClose ? 1 : 0;
+
         var closeIndex = Array.FindIndex(headers, header => string.Equals(header, "Close", StringComparison.OrdinalIgnoreCase));
-
-        if (closeIndex < 0 || closeIndex >= values.Length)
+        if (closeIndex < 0)
         {
-            return null;
+            closeIndex = 6;
         }
 
-        var raw = values[closeIndex];
-        if (string.Equals(raw, "N/D", StringComparison.OrdinalIgnoreCase))
+        var dateIndex = Array.FindIndex(headers, header => string.Equals(header, "Date", StringComparison.OrdinalIgnoreCase));
+        if (dateIndex < 0)
         {
-            return null;
+            dateIndex = 1;
         }
 
-        if (!decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var close))
+        var parsedRows = new List<(decimal Close, DateTimeOffset? Date, int Order)>();
+        var order = 0;
+
+        for (var index = startIndex; index < lines.Length; index += 1)
         {
-            return null;
+            var values = lines[index].Split(',', StringSplitOptions.TrimEntries);
+            if (closeIndex < 0 || closeIndex >= values.Length)
+            {
+                continue;
+            }
+
+            var closeRaw = values[closeIndex];
+            if (string.Equals(closeRaw, "N/D", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!decimal.TryParse(closeRaw, NumberStyles.Number, CultureInfo.InvariantCulture, out var closeValue))
+            {
+                continue;
+            }
+
+            if (closeValue <= 0m)
+            {
+                continue;
+            }
+
+            DateTimeOffset? rowDate = null;
+            if (dateIndex >= 0 &&
+                dateIndex < values.Length &&
+                DateOnly.TryParseExact(values[dateIndex], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
+            {
+                rowDate = new DateTimeOffset(parsedDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            }
+
+            parsedRows.Add((decimal.Round(closeValue, 4, MidpointRounding.AwayFromZero), rowDate, order));
+            order += 1;
         }
 
-        return close > 0m ? decimal.Round(close, 4, MidpointRounding.AwayFromZero) : null;
+        if (parsedRows.Count == 0)
+        {
+            return (null, null, null, null);
+        }
+
+        var hasAnyDate = parsedRows.Any(row => row.Date.HasValue);
+        var orderedRows = hasAnyDate
+            ? parsedRows
+                .OrderByDescending(row => row.Date ?? DateTimeOffset.MinValue)
+                .ThenBy(row => row.Order)
+                .ToArray()
+            : parsedRows.ToArray();
+
+        var current = orderedRows[0];
+        var previous = orderedRows.Length > 1 ? orderedRows[1] : default;
+
+        return (
+            current.Close,
+            current.Date,
+            orderedRows.Length > 1 ? previous.Close : null,
+            orderedRows.Length > 1 ? previous.Date : null);
     }
 
     private bool IsFresh(DateTimeOffset fetchedAtUtc)

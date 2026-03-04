@@ -241,6 +241,8 @@ public sealed record InvestmentHoldingResponse(
     decimal? ManualPriceOverride,
     decimal LastFetchedPrice,
     decimal EffectivePrice,
+    decimal? PreviousClosePrice,
+    DateTimeOffset? PreviousCloseAt,
     decimal CurrentValue,
     decimal CostBasis,
     decimal ProfitLoss,
@@ -307,7 +309,8 @@ public sealed record UpdateSavingsGoalRequest(
     decimal? MonthlyContributionTarget,
     int? TargetYear,
     int? TargetMonth,
-    bool ClearTargetDate);
+    bool ClearTargetDate,
+    bool? IsArchived);
 
 public sealed record AssetsOverviewResponse(
     int Year,

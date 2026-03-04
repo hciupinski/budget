@@ -57,7 +57,7 @@ public sealed class InvestmentsService(
         var symbolsRefreshed = new List<string>();
         var symbolsFallbackToStale = new List<string>();
         var cachedBySymbol = new Dictionary<string, MarketPriceCacheSnapshot>(StringComparer.OrdinalIgnoreCase);
-        var refreshedBySymbol = new Dictionary<string, (decimal Price, DateTimeOffset FetchedAtUtc)>(StringComparer.OrdinalIgnoreCase);
+        var refreshedBySymbol = new Dictionary<string, (decimal CurrentPrice, DateTimeOffset CurrentCloseAt, decimal? PreviousClosePrice, DateTimeOffset? PreviousCloseAt)>(StringComparer.OrdinalIgnoreCase);
         var hadProviderFailures = false;
 
         foreach (var symbol in symbolsRequested)
@@ -92,20 +92,24 @@ public sealed class InvestmentsService(
 
                 hadProviderFailures |= result.ProviderFailed;
 
-                if (!result.Price.HasValue)
+                if (!result.CurrentClosePrice.HasValue)
                 {
                     symbolsFallbackToStale.Add(symbol);
                     continue;
                 }
 
-                var fetchedAt = result.FetchedAtUtc ?? now;
-                refreshedBySymbol[symbol] = (result.Price.Value, fetchedAt);
+                var fetchedAt = result.CurrentCloseAt ?? now;
+                refreshedBySymbol[symbol] = (
+                    result.CurrentClosePrice.Value,
+                    fetchedAt,
+                    result.PreviousClosePrice,
+                    result.PreviousCloseAt);
                 symbolsRefreshed.Add(symbol);
 
                 foreach (var holding in holdingsBySymbol[symbol])
                 {
                     var hasChanged =
-                        holding.LastFetchedPrice != result.Price.Value ||
+                        holding.LastFetchedPrice != result.CurrentClosePrice.Value ||
                         holding.LastPriceUpdatedAt < fetchedAt;
 
                     if (!hasChanged)
@@ -113,7 +117,7 @@ public sealed class InvestmentsService(
                         continue;
                     }
 
-                    holding.LastFetchedPrice = result.Price.Value;
+                    holding.LastFetchedPrice = result.CurrentClosePrice.Value;
                     holding.LastPriceUpdatedAt = fetchedAt;
                     holding.UpdatedAt = now;
                     updated++;
@@ -147,12 +151,22 @@ public sealed class InvestmentsService(
 
             if (refreshedBySymbol.TryGetValue(symbol, out var refreshed))
             {
-                return ToHoldingResponse(holding, refreshed.Price, refreshed.FetchedAtUtc);
+                return ToHoldingResponse(
+                    holding,
+                    refreshed.CurrentPrice,
+                    refreshed.CurrentCloseAt,
+                    refreshed.PreviousClosePrice,
+                    refreshed.PreviousCloseAt);
             }
 
             if (cachedBySymbol.TryGetValue(symbol, out var cached))
             {
-                return ToHoldingResponse(holding, cached.Price, cached.FetchedAtUtc);
+                return ToHoldingResponse(
+                    holding,
+                    cached.CurrentClosePrice,
+                    cached.CurrentCloseAt,
+                    cached.PreviousClosePrice,
+                    cached.PreviousCloseAt);
             }
 
             return ToHoldingResponse(holding);
@@ -199,7 +213,7 @@ public sealed class InvestmentsService(
 
         var now = DateTimeOffset.UtcNow;
         var fetched = await marketPriceService.GetPriceAsync(symbol, forceRefresh: false, cancellationToken);
-        var fetchedPrice = fetched.Price;
+        var fetchedPrice = fetched.CurrentClosePrice;
         var effectiveFetched = fetchedPrice ?? decimal.Round(request.AverageCost, 4, MidpointRounding.AwayFromZero);
         var holding = new InvestmentHolding
         {
@@ -366,13 +380,13 @@ public sealed class InvestmentsService(
             var normalizedSymbol = NormalizeSymbol(holding.Symbol);
             symbols.Add(normalizedSymbol);
 
-            if (!pricesBySymbol.TryGetValue(normalizedSymbol, out var fetchedPrice) || !fetchedPrice.Price.HasValue)
+            if (!pricesBySymbol.TryGetValue(normalizedSymbol, out var fetchedPrice) || !fetchedPrice.CurrentClosePrice.HasValue)
             {
                 continue;
             }
 
-            var nextPrice = fetchedPrice.Price.Value;
-            var nextUpdatedAt = fetchedPrice.FetchedAtUtc ?? now;
+            var nextPrice = fetchedPrice.CurrentClosePrice.Value;
+            var nextUpdatedAt = fetchedPrice.CurrentCloseAt ?? now;
             var hasChanged = holding.LastFetchedPrice != nextPrice || holding.LastPriceUpdatedAt < nextUpdatedAt;
 
             if (!hasChanged)

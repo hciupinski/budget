@@ -152,7 +152,7 @@ public sealed class BudgetServiceValidationTests
 
         public Task<MarketPriceLookupResult> GetPriceAsync(string symbol, bool forceRefresh, CancellationToken cancellationToken)
         {
-            return Task.FromResult(new MarketPriceLookupResult(symbol, null, null, FromCache: false, ProviderFailed: false));
+            return Task.FromResult(new MarketPriceLookupResult(symbol, null, null, null, null, FromCache: false, ProviderFailed: false));
         }
 
         public Task<IReadOnlyDictionary<string, MarketPriceLookupResult>> GetPricesAsync(
