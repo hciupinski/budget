@@ -21,6 +21,11 @@ public static class BudgetModule
 
         services.AddScoped<BudgetDbInitializer>();
         services.AddScoped<BudgetService>();
+        services.AddMemoryCache();
+        services.AddOptions<MarketPricesOptions>()
+            .Bind(configuration.GetSection(MarketPricesOptions.SectionName))
+            .ValidateDataAnnotations();
+        services.AddSingleton<IMarketPriceService, MarketPriceService>();
         services.AddHttpClient("fx-rates");
         services.AddHttpClient("market-prices");
 
@@ -272,6 +277,42 @@ public static class BudgetModule
                 var targetYear = year ?? now.Year;
                 var targetMonth = month ?? now.Month;
                 var result = await service.GetAssetsOverviewAsync(targetYear, targetMonth, ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapGet("/assets/accounts-overview", async (
+            int? year,
+            int? month,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                var targetYear = year ?? now.Year;
+                var targetMonth = month ?? now.Month;
+                var result = await service.GetAccountsOverviewAsync(targetYear, targetMonth, ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return ToErrorResult(ex);
+            }
+        });
+
+        group.MapGet("/assets/investments", async (
+            ClaimsPrincipal user,
+            BudgetService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await service.GetInvestmentsAsync(CurrentUser(user), ct);
                 return Results.Ok(result);
             }
             catch (Exception ex)

@@ -171,3 +171,29 @@ export type AssetsOverviewResponse = {
   };
   savingsGoals: SavingsGoal[];
 };
+
+export type AssetsAccountsOverviewResponse = {
+  year: number;
+  month: number;
+  summary: AssetsOverviewResponse["summary"];
+  accounts: BudgetAccount[];
+  transfers: AccountTransfer[];
+  snapshots: AccountSnapshot[];
+  savingsGoals: SavingsGoal[];
+};
+
+export type InvestmentPriceRefreshMeta = {
+  refreshedAtUtc: string;
+  cacheTtlMinutes: number;
+  symbolsRequested: string[];
+  symbolsRefreshed: string[];
+  symbolsFromCache: string[];
+  symbolsFallbackToStale: string[];
+  hadProviderFailures: boolean;
+};
+
+export type AssetsInvestmentsResponse = {
+  holdings: InvestmentHolding[];
+  investments: AssetsOverviewResponse["investments"];
+  priceRefreshMeta: InvestmentPriceRefreshMeta;
+};

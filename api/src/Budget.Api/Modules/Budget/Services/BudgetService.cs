@@ -12,6 +12,7 @@ namespace Budget.Api.Modules.Budget.Services;
 public sealed class BudgetService(
     BudgetDbContext dbContext,
     IHttpClientFactory httpClientFactory,
+    IMarketPriceService marketPriceService,
     ILogger<BudgetService> logger)
 {
     private const string SectionsStateKey = "managed_sections";
@@ -843,30 +844,9 @@ public sealed class BudgetService(
 
         var accountResponses = accounts.Select(ToAccountResponse).ToArray();
         var accountById = accounts.ToDictionary(x => x.Id);
-        var holdingResponses = holdings.Select(ToHoldingResponse).ToArray();
+        var holdingResponses = holdings.Select(holding => ToHoldingResponse(holding)).ToArray();
         var investments = BuildInvestmentsDashboard(holdingResponses);
-        var rates = await ResolveExchangeRatesAsync(
-            baseCurrency,
-            accounts.Select(x => x.Currency).Distinct(StringComparer.OrdinalIgnoreCase),
-            cancellationToken);
-        var ratesWithBase = new Dictionary<string, decimal>(rates, StringComparer.OrdinalIgnoreCase)
-        {
-            [baseCurrency] = 1m
-        };
-
-        var netWorth = decimal.Round(accounts
-            .Where(x => !x.IsArchived)
-            .Sum(x => x.CurrentBalance * ratesWithBase[NormalizeCurrencyCode(x.Currency)]), 2, MidpointRounding.AwayFromZero);
-        var snapshotPlanned = decimal.Round(snapshots
-            .Sum(x => x.PlannedBalance * ratesWithBase[NormalizeCurrencyCode(x.Account.Currency)]), 2, MidpointRounding.AwayFromZero);
-        var snapshotActual = decimal.Round(snapshots
-            .Sum(x => (x.ActualBalance ?? x.PlannedBalance) * ratesWithBase[NormalizeCurrencyCode(x.Account.Currency)]), 2, MidpointRounding.AwayFromZero);
-        var summary = new AssetsOverviewSummaryResponse(
-            BaseCurrency: baseCurrency,
-            NetWorth: netWorth,
-            SnapshotPlanned: snapshotPlanned,
-            SnapshotActual: snapshotActual,
-            ExchangeRates: ratesWithBase);
+        var summary = await BuildAssetsSummaryAsync(baseCurrency, accounts, snapshots, cancellationToken);
 
         return new AssetsOverviewResponse(
             Year: year,
@@ -894,6 +874,224 @@ public sealed class BudgetService(
             Holdings: holdingResponses,
             Investments: investments,
             SavingsGoals: savingsGoals.Select(x => ToSavingsGoalResponse(x, accountById)).ToArray());
+    }
+
+    public async Task<AssetsAccountsOverviewResponse> GetAccountsOverviewAsync(int year, int month, CancellationToken cancellationToken)
+    {
+        ValidateYear(year);
+        ValidateMonth(month);
+
+        var generalSettings = await LoadUiStateAsync<GeneralSettingsState>(GeneralSettingsStateKey, cancellationToken);
+        var baseCurrency = NormalizeCurrencyCode(generalSettings?.Currency);
+
+        var accounts = await dbContext.Accounts
+            .AsNoTracking()
+            .OrderBy(x => x.IsArchived)
+            .ThenBy(x => x.Kind)
+            .ThenBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var snapshots = await dbContext.AccountSnapshots
+            .AsNoTracking()
+            .Include(x => x.Account)
+            .Where(x => x.Year == year && x.Month == month)
+            .OrderBy(x => x.Account.Name)
+            .ToListAsync(cancellationToken);
+
+        var transfers = await dbContext.AccountTransfers
+            .AsNoTracking()
+            .Include(x => x.FromAccount)
+            .Include(x => x.ToAccount)
+            .OrderByDescending(x => x.TransferDate)
+            .Take(50)
+            .ToListAsync(cancellationToken);
+
+        var savingsGoals = await dbContext.SavingsGoals
+            .AsNoTracking()
+            .Include(x => x.Account)
+            .OrderBy(x => x.Name)
+            .ToListAsync(cancellationToken);
+
+        var accountResponses = accounts.Select(ToAccountResponse).ToArray();
+        var accountById = accounts.ToDictionary(x => x.Id);
+        var summary = await BuildAssetsSummaryAsync(baseCurrency, accounts, snapshots, cancellationToken);
+
+        return new AssetsAccountsOverviewResponse(
+            Year: year,
+            Month: month,
+            Summary: summary,
+            Accounts: accountResponses,
+            Transfers: transfers.Select(x => new AccountTransferResponse(
+                x.Id,
+                x.FromAccountId,
+                x.FromAccount.Name,
+                x.ToAccountId,
+                x.ToAccount.Name,
+                x.Amount,
+                x.Note,
+                x.TransferDate)).ToArray(),
+            Snapshots: snapshots.Select(x => new AccountSnapshotResponse(
+                x.AccountId,
+                x.Account.Name,
+                ToWireValue(x.Account.Kind),
+                x.Year,
+                x.Month,
+                x.PlannedBalance,
+                x.ActualBalance,
+                x.UpdatedAt)).ToArray(),
+            SavingsGoals: savingsGoals.Select(x => ToSavingsGoalResponse(x, accountById)).ToArray());
+    }
+
+    public async Task<AssetsInvestmentsResponse> GetInvestmentsAsync(string actor, CancellationToken cancellationToken)
+    {
+        var holdings = await dbContext.InvestmentHoldings
+            .Include(x => x.Account)
+            .OrderBy(x => x.Symbol)
+            .ToListAsync(cancellationToken);
+
+        if (holdings.Count == 0)
+        {
+            return new AssetsInvestmentsResponse(
+                Holdings: [],
+                Investments: BuildInvestmentsDashboard([]),
+                PriceRefreshMeta: new InvestmentPriceRefreshMetaResponse(
+                    RefreshedAtUtc: DateTimeOffset.UtcNow,
+                    CacheTtlMinutes: marketPriceService.CacheTtlMinutes,
+                    SymbolsRequested: [],
+                    SymbolsRefreshed: [],
+                    SymbolsFromCache: [],
+                    SymbolsFallbackToStale: [],
+                    HadProviderFailures: false));
+        }
+
+        var ttlMinutes = marketPriceService.CacheTtlMinutes;
+        var staleThreshold = DateTimeOffset.UtcNow.AddMinutes(-ttlMinutes);
+
+        var holdingsBySymbol = holdings
+            .GroupBy(x => NormalizeSymbol(x.Symbol), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(x => x.Key, x => x.ToArray(), StringComparer.OrdinalIgnoreCase);
+
+        var symbolsRequested = holdingsBySymbol.Keys
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var symbolsToRefresh = new List<string>();
+        var symbolsFromCache = new List<string>();
+        var symbolsRefreshed = new List<string>();
+        var symbolsFallbackToStale = new List<string>();
+        var cachedBySymbol = new Dictionary<string, MarketPriceCacheSnapshot>(StringComparer.OrdinalIgnoreCase);
+        var refreshedBySymbol = new Dictionary<string, (decimal Price, DateTimeOffset FetchedAtUtc)>(StringComparer.OrdinalIgnoreCase);
+        var hadProviderFailures = false;
+
+        foreach (var symbol in symbolsRequested)
+        {
+            var symbolHoldings = holdingsBySymbol[symbol];
+            var hasStaleInDb = symbolHoldings.Any(x => x.LastPriceUpdatedAt < staleThreshold);
+            var hasFreshCache = marketPriceService.TryGetFreshCachedPrice(symbol, out var cacheSnapshot);
+
+            if (hasFreshCache && cacheSnapshot is not null && !hasStaleInDb)
+            {
+                symbolsFromCache.Add(symbol);
+                cachedBySymbol[symbol] = cacheSnapshot;
+                continue;
+            }
+
+            symbolsToRefresh.Add(symbol);
+        }
+
+        if (symbolsToRefresh.Count > 0)
+        {
+            var fetchedBySymbol = await marketPriceService.GetPricesAsync(symbolsToRefresh, forceRefresh: false, cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            var updated = 0;
+
+            foreach (var symbol in symbolsToRefresh)
+            {
+                if (!fetchedBySymbol.TryGetValue(symbol, out var result))
+                {
+                    symbolsFallbackToStale.Add(symbol);
+                    continue;
+                }
+
+                hadProviderFailures |= result.ProviderFailed;
+
+                if (!result.Price.HasValue)
+                {
+                    symbolsFallbackToStale.Add(symbol);
+                    continue;
+                }
+
+                var fetchedAt = result.FetchedAtUtc ?? now;
+                refreshedBySymbol[symbol] = (result.Price.Value, fetchedAt);
+                symbolsRefreshed.Add(symbol);
+
+                foreach (var holding in holdingsBySymbol[symbol])
+                {
+                    var hasChanged =
+                        holding.LastFetchedPrice != result.Price.Value ||
+                        holding.LastPriceUpdatedAt < fetchedAt;
+
+                    if (!hasChanged)
+                    {
+                        continue;
+                    }
+
+                    holding.LastFetchedPrice = result.Price.Value;
+                    holding.LastPriceUpdatedAt = fetchedAt;
+                    holding.UpdatedAt = now;
+                    updated++;
+                }
+            }
+
+            if (updated > 0)
+            {
+                dbContext.AuditEntries.Add(new AuditEntry
+                {
+                    EntityType = "InvestmentHolding",
+                    EntityId = Guid.NewGuid(),
+                    EventType = "PRICES_AUTO_REFRESHED",
+                    ChangedBy = actor,
+                    ChangedAt = now,
+                    Payload = JsonSerializer.Serialize(new
+                    {
+                        updated,
+                        symbolsRefreshed = symbolsRefreshed.Count,
+                        symbolsFallbackToStale = symbolsFallbackToStale.Count
+                    })
+                });
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+        }
+
+        var holdingResponses = holdings.Select(holding =>
+        {
+            var symbol = NormalizeSymbol(holding.Symbol);
+
+            if (refreshedBySymbol.TryGetValue(symbol, out var refreshed))
+            {
+                return ToHoldingResponse(holding, refreshed.Price, refreshed.FetchedAtUtc);
+            }
+
+            if (cachedBySymbol.TryGetValue(symbol, out var cached))
+            {
+                return ToHoldingResponse(holding, cached.Price, cached.FetchedAtUtc);
+            }
+
+            return ToHoldingResponse(holding);
+        }).ToArray();
+
+        return new AssetsInvestmentsResponse(
+            Holdings: holdingResponses,
+            Investments: BuildInvestmentsDashboard(holdingResponses),
+            PriceRefreshMeta: new InvestmentPriceRefreshMetaResponse(
+                RefreshedAtUtc: DateTimeOffset.UtcNow,
+                CacheTtlMinutes: ttlMinutes,
+                SymbolsRequested: symbolsRequested,
+                SymbolsRefreshed: symbolsRefreshed.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray(),
+                SymbolsFromCache: symbolsFromCache.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray(),
+                SymbolsFallbackToStale: symbolsFallbackToStale.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray(),
+                HadProviderFailures: hadProviderFailures));
     }
 
     public async Task<BudgetAccountResponse> CreateAccountAsync(
@@ -1230,7 +1428,8 @@ public sealed class BudgetService(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var fetchedPrice = await FetchMarketPriceFromProviderAsync(symbol, cancellationToken);
+        var fetched = await marketPriceService.GetPriceAsync(symbol, forceRefresh: false, cancellationToken);
+        var fetchedPrice = fetched.Price;
         var effectiveFetched = fetchedPrice ?? decimal.Round(request.AverageCost, 4, MidpointRounding.AwayFromZero);
         var holding = new InvestmentHolding
         {
@@ -1386,31 +1585,33 @@ public sealed class BudgetService(
         var now = DateTimeOffset.UtcNow;
         var updated = 0;
         var symbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var pricesBySymbol = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+        var normalizedSymbols = holdings
+            .Select(x => NormalizeSymbol(x.Symbol))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var pricesBySymbol = await marketPriceService.GetPricesAsync(normalizedSymbols, forceRefresh: true, cancellationToken);
 
         foreach (var holding in holdings)
         {
-            symbols.Add(holding.Symbol);
-            if (!pricesBySymbol.ContainsKey(holding.Symbol))
-            {
-                pricesBySymbol[holding.Symbol] = await FetchMarketPriceFromProviderAsync(holding.Symbol, cancellationToken);
-            }
+            var normalizedSymbol = NormalizeSymbol(holding.Symbol);
+            symbols.Add(normalizedSymbol);
 
-            var fetchedPrice = pricesBySymbol[holding.Symbol];
-            if (!fetchedPrice.HasValue)
+            if (!pricesBySymbol.TryGetValue(normalizedSymbol, out var fetchedPrice) || !fetchedPrice.Price.HasValue)
             {
                 continue;
             }
 
-            var nextPrice = fetchedPrice.Value;
+            var nextPrice = fetchedPrice.Price.Value;
+            var nextUpdatedAt = fetchedPrice.FetchedAtUtc ?? now;
+            var hasChanged = holding.LastFetchedPrice != nextPrice || holding.LastPriceUpdatedAt < nextUpdatedAt;
 
-            if (holding.LastFetchedPrice == nextPrice)
+            if (!hasChanged)
             {
                 continue;
             }
 
             holding.LastFetchedPrice = nextPrice;
-            holding.LastPriceUpdatedAt = now;
+            holding.LastPriceUpdatedAt = nextUpdatedAt;
             holding.UpdatedAt = now;
             updated++;
         }
@@ -1872,9 +2073,14 @@ public sealed class BudgetService(
             account.UpdatedAt);
     }
 
-    private static InvestmentHoldingResponse ToHoldingResponse(InvestmentHolding holding)
+    private static InvestmentHoldingResponse ToHoldingResponse(
+        InvestmentHolding holding,
+        decimal? fetchedPriceOverride = null,
+        DateTimeOffset? fetchedAtOverride = null)
     {
-        var effectivePrice = holding.ManualPriceOverride ?? holding.LastFetchedPrice;
+        var fetchedPrice = fetchedPriceOverride ?? holding.LastFetchedPrice;
+        var fetchedAt = fetchedAtOverride ?? holding.LastPriceUpdatedAt;
+        var effectivePrice = holding.ManualPriceOverride ?? fetchedPrice;
         var currentValue = decimal.Round(holding.Units * effectivePrice, 2, MidpointRounding.AwayFromZero);
         var costBasis = decimal.Round(holding.Units * holding.AverageCost, 2, MidpointRounding.AwayFromZero);
         var profitLoss = decimal.Round(currentValue - costBasis, 2, MidpointRounding.AwayFromZero);
@@ -1888,12 +2094,12 @@ public sealed class BudgetService(
             holding.Units,
             holding.AverageCost,
             holding.ManualPriceOverride,
-            holding.LastFetchedPrice,
+            fetchedPrice,
             effectivePrice,
             currentValue,
             costBasis,
             profitLoss,
-            holding.LastPriceUpdatedAt);
+            fetchedAt);
     }
 
     private static InvestmentsDashboardResponse BuildInvestmentsDashboard(
@@ -1920,6 +2126,37 @@ public sealed class BudgetService(
             TotalCostBasis: totalCostBasis,
             TotalProfitLoss: totalProfitLoss,
             Allocation: allocation);
+    }
+
+    private async Task<AssetsOverviewSummaryResponse> BuildAssetsSummaryAsync(
+        string baseCurrency,
+        IReadOnlyList<BudgetAccount> accounts,
+        IReadOnlyList<AccountSnapshot> snapshots,
+        CancellationToken cancellationToken)
+    {
+        var rates = await ResolveExchangeRatesAsync(
+            baseCurrency,
+            accounts.Select(x => x.Currency).Distinct(StringComparer.OrdinalIgnoreCase),
+            cancellationToken);
+        var ratesWithBase = new Dictionary<string, decimal>(rates, StringComparer.OrdinalIgnoreCase)
+        {
+            [baseCurrency] = 1m
+        };
+
+        var netWorth = decimal.Round(accounts
+            .Where(x => !x.IsArchived)
+            .Sum(x => x.CurrentBalance * ratesWithBase[NormalizeCurrencyCode(x.Currency)]), 2, MidpointRounding.AwayFromZero);
+        var snapshotPlanned = decimal.Round(snapshots
+            .Sum(x => x.PlannedBalance * ratesWithBase[NormalizeCurrencyCode(x.Account.Currency)]), 2, MidpointRounding.AwayFromZero);
+        var snapshotActual = decimal.Round(snapshots
+            .Sum(x => (x.ActualBalance ?? x.PlannedBalance) * ratesWithBase[NormalizeCurrencyCode(x.Account.Currency)]), 2, MidpointRounding.AwayFromZero);
+
+        return new AssetsOverviewSummaryResponse(
+            BaseCurrency: baseCurrency,
+            NetWorth: netWorth,
+            SnapshotPlanned: snapshotPlanned,
+            SnapshotActual: snapshotActual,
+            ExchangeRates: ratesWithBase);
     }
 
     private async Task<Dictionary<string, decimal>> ResolveExchangeRatesAsync(
@@ -2102,82 +2339,6 @@ public sealed class BudgetService(
         }
 
         return normalized;
-    }
-
-    private async Task<decimal?> FetchMarketPriceFromProviderAsync(string symbol, CancellationToken cancellationToken)
-    {
-        var normalized = NormalizeSymbol(symbol);
-
-        try
-        {
-            var client = httpClientFactory.CreateClient("market-prices");
-            client.Timeout = TimeSpan.FromSeconds(5);
-            var endpoint = $"https://stooq.com/q/l/?s={normalized.ToLowerInvariant()}&i=d";
-            var csv = await client.GetStringAsync(endpoint, cancellationToken);
-            return ParseStooqClosePrice(csv);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Unable to fetch market price for symbol {Symbol}.", normalized);
-            return null;
-        }
-    }
-
-    private static decimal? ParseStooqClosePrice(string csv)
-    {
-        if (string.IsNullOrWhiteSpace(csv))
-        {
-            return null;
-        }
-
-        var lines = csv
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .ToArray();
-
-        if (lines.Length < 2)
-        {
-            var singleRow = lines[0].Split(',', StringSplitOptions.TrimEntries);
-            if (singleRow.Length < 7)
-            {
-                return null;
-            }
-
-            var closeRaw = singleRow[6];
-            if (string.Equals(closeRaw, "N/D", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            if (!decimal.TryParse(closeRaw, NumberStyles.Number, CultureInfo.InvariantCulture, out var directClose))
-            {
-                return null;
-            }
-
-            return directClose > 0m ? decimal.Round(directClose, 4, MidpointRounding.AwayFromZero) : null;
-        }
-
-        var headers = lines[0].Split(',', StringSplitOptions.TrimEntries);
-        var values = lines[1].Split(',', StringSplitOptions.TrimEntries);
-        var closeIndex = Array.FindIndex(headers, header => string.Equals(header, "Close", StringComparison.OrdinalIgnoreCase));
-
-        if (closeIndex < 0 || closeIndex >= values.Length)
-        {
-            return null;
-        }
-
-        var raw = values[closeIndex];
-        if (string.Equals(raw, "N/D", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        if (!decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var close))
-        {
-            return null;
-        }
-
-        return close > 0m ? decimal.Round(close, 4, MidpointRounding.AwayFromZero) : null;
     }
 
     private static void ValidateSavingsGoalDate(int? targetYear, int? targetMonth)

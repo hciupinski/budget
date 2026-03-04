@@ -325,3 +325,26 @@ public sealed record AssetsOverviewSummaryResponse(
     decimal SnapshotPlanned,
     decimal SnapshotActual,
     IReadOnlyDictionary<string, decimal> ExchangeRates);
+
+public sealed record AssetsAccountsOverviewResponse(
+    int Year,
+    int Month,
+    AssetsOverviewSummaryResponse Summary,
+    IReadOnlyList<BudgetAccountResponse> Accounts,
+    IReadOnlyList<AccountTransferResponse> Transfers,
+    IReadOnlyList<AccountSnapshotResponse> Snapshots,
+    IReadOnlyList<SavingsGoalResponse> SavingsGoals);
+
+public sealed record InvestmentPriceRefreshMetaResponse(
+    DateTimeOffset RefreshedAtUtc,
+    int CacheTtlMinutes,
+    IReadOnlyList<string> SymbolsRequested,
+    IReadOnlyList<string> SymbolsRefreshed,
+    IReadOnlyList<string> SymbolsFromCache,
+    IReadOnlyList<string> SymbolsFallbackToStale,
+    bool HadProviderFailures);
+
+public sealed record AssetsInvestmentsResponse(
+    IReadOnlyList<InvestmentHoldingResponse> Holdings,
+    InvestmentsDashboardResponse Investments,
+    InvestmentPriceRefreshMetaResponse PriceRefreshMeta);

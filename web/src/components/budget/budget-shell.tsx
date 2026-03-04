@@ -44,7 +44,7 @@ const NAV_ITEMS = [
     icon: TransactionsIcon
   },
   {
-    href: "/accounts",
+    href: "/accounts/general",
     label: "Accounts",
     aliases: ["/accounts"],
     icon: AccountsIcon

@@ -1,9 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { monthLongLabel } from "@/components/budget/budget-ui-utils";
 import { ChevronDownIcon, ChevronRightIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
-import type { AccountKind, AssetsOverviewResponse, BudgetAccount, InvestmentHolding } from "@/lib/budget-types";
+import type {
+  AccountKind,
+  AssetsAccountsOverviewResponse,
+  AssetsInvestmentsResponse,
+  BudgetAccount,
+  InvestmentHolding
+} from "@/lib/budget-types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { currencyLabel, formatCurrency, type CurrencyCode, useCurrencySetting } from "@/lib/currency-settings";
@@ -13,6 +20,14 @@ const ACCOUNT_KINDS: ReadonlyArray<{ value: AccountKind; label: string }> = [
   { value: "SAVINGS", label: "Savings" },
   { value: "BROKERAGE", label: "Brokerage" },
   { value: "CASH_BUCKET", label: "Cash Bucket" }
+];
+
+export type AccountsSubpage = "general" | "savings" | "investements";
+
+const ACCOUNTS_SUBPAGES: ReadonlyArray<{ value: AccountsSubpage; label: string; href: string }> = [
+  { value: "general", label: "General", href: "/accounts/general" },
+  { value: "savings", label: "Savings", href: "/accounts/savings" },
+  { value: "investements", label: "Investements", href: "/accounts/investements" }
 ];
 
 function formatDate(iso: string): string {
@@ -76,13 +91,15 @@ type HoldingAccountGroup = {
   symbols: HoldingSymbolGroup[];
 };
 
-export function AccountsView() {
+export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpage }) {
   const now = new Date();
   const currency = useCurrencySetting();
   const [year, setYear] = useState<number>(now.getFullYear());
   const [month, setMonth] = useState<number>(now.getMonth() + 1);
-  const [overview, setOverview] = useState<AssetsOverviewResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [accountsOverview, setAccountsOverview] = useState<AssetsAccountsOverviewResponse | null>(null);
+  const [investmentsData, setInvestmentsData] = useState<AssetsInvestmentsResponse | null>(null);
+  const [loadingAccounts, setLoadingAccounts] = useState<boolean>(true);
+  const [loadingInvestments, setLoadingInvestments] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -120,18 +137,22 @@ export function AccountsView() {
   const [goalCurrentAmount, setGoalCurrentAmount] = useState<string>("0");
   const [goalMonthlyContribution, setGoalMonthlyContribution] = useState<string>("0");
 
-  const activeAccounts = useMemo(() => (overview?.accounts ?? []).filter((item) => !item.isArchived), [overview?.accounts]);
+  const loading = loadingAccounts || loadingInvestments;
+  const activeAccounts = useMemo(
+    () => (accountsOverview?.accounts ?? []).filter((item) => !item.isArchived),
+    [accountsOverview?.accounts]
+  );
   const brokerageAccounts = useMemo(
     () => activeAccounts.filter((item) => item.kind === "BROKERAGE"),
     [activeAccounts]
   );
   const accountCurrencyById = useMemo(() => {
     const map = new Map<string, CurrencyCode>();
-    for (const account of overview?.accounts ?? []) {
+    for (const account of accountsOverview?.accounts ?? []) {
       map.set(account.id, account.currency);
     }
     return map;
-  }, [overview?.accounts]);
+  }, [accountsOverview?.accounts]);
 
   function redirectToLoginIfUnauthorized(statusCode: number): boolean {
     if (statusCode === 401) {
@@ -142,10 +163,10 @@ export function AccountsView() {
     return false;
   }
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
+  const loadAccountsOverview = useCallback(async () => {
+    setLoadingAccounts(true);
 
-    const response = await fetch(`/api/budget/assets/overview?year=${year}&month=${month}`, {
+    const response = await fetch(`/api/budget/assets/accounts-overview?year=${year}&month=${month}`, {
       method: "GET",
       cache: "no-store"
     });
@@ -155,16 +176,16 @@ export function AccountsView() {
         return;
       }
 
-      setMessage("Unable to load accounts and investments data.");
-      setOverview(null);
-      setLoading(false);
+      setMessage("Unable to load accounts data.");
+      setAccountsOverview(null);
+      setLoadingAccounts(false);
       return;
     }
 
-    const payload = (await response.json()) as AssetsOverviewResponse;
-    setOverview(payload);
+    const payload = (await response.json()) as AssetsAccountsOverviewResponse;
+    setAccountsOverview(payload);
     setMessage(null);
-    setLoading(false);
+    setLoadingAccounts(false);
 
     setSnapshotDrafts(() => {
       const next: Record<string, { planned: string; actual: string }> = {};
@@ -177,6 +198,31 @@ export function AccountsView() {
       }
       return next;
     });
+  }, [month, year]);
+
+  const loadInvestments = useCallback(async () => {
+    setLoadingInvestments(true);
+
+    const response = await fetch("/api/budget/assets/investments", {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      if (redirectToLoginIfUnauthorized(response.status)) {
+        return;
+      }
+
+      setMessage("Unable to load investments data.");
+      setInvestmentsData(null);
+      setLoadingInvestments(false);
+      return;
+    }
+
+    const payload = (await response.json()) as AssetsInvestmentsResponse;
+    setInvestmentsData(payload);
+    setMessage(null);
+    setLoadingInvestments(false);
 
     setManualPriceDrafts(() => {
       const next: Record<string, string> = {};
@@ -185,11 +231,17 @@ export function AccountsView() {
       }
       return next;
     });
-  }, [month, year]);
+  }, []);
 
   useEffect(() => {
-    void loadOverview();
-  }, [loadOverview]);
+    void loadAccountsOverview();
+  }, [loadAccountsOverview]);
+
+  useEffect(() => {
+    if (subpage === "investements") {
+      void loadInvestments();
+    }
+  }, [loadInvestments, subpage]);
 
   useEffect(() => {
     setNewAccountCurrency(currency);
@@ -207,6 +259,13 @@ export function AccountsView() {
       setHoldingAccountId(brokerageAccounts[0].id);
     }
   }, [brokerageAccounts, holdingAccountId]);
+
+  const refreshData = useCallback(async () => {
+    await loadAccountsOverview();
+    if (subpage === "investements") {
+      await loadInvestments();
+    }
+  }, [loadAccountsOverview, loadInvestments, subpage]);
 
   async function submitJson(path: string, method: "POST" | "PUT" | "PATCH", body: unknown): Promise<Response> {
     return fetch(path, {
@@ -261,7 +320,7 @@ export function AccountsView() {
     cancelEditAccount();
     setMessage("Account updated.");
     setSaving(false);
-    await loadOverview();
+    await loadAccountsOverview();
   }
 
   async function removeAccount(accountId: string) {
@@ -284,7 +343,7 @@ export function AccountsView() {
     cancelEditAccount();
     setMessage("Account removed.");
     setSaving(false);
-    await loadOverview();
+    await loadAccountsOverview();
   }
 
   async function createAccount() {
@@ -316,7 +375,7 @@ export function AccountsView() {
     setNewAccountBalance("0");
     setMessage("Account created.");
     setSaving(false);
-    await loadOverview();
+    await loadAccountsOverview();
   }
 
   async function createTransfer() {
@@ -349,11 +408,11 @@ export function AccountsView() {
     setTransferNote("");
     setMessage("Transfer logged.");
     setSaving(false);
-    await loadOverview();
+    await loadAccountsOverview();
   }
 
   async function saveSnapshots() {
-    if (!overview) {
+    if (!accountsOverview) {
       return;
     }
 
@@ -386,7 +445,7 @@ export function AccountsView() {
 
     setMessage("Monthly snapshots saved.");
     setSaving(false);
-    await loadOverview();
+    await loadAccountsOverview();
   }
 
   async function createHolding() {
@@ -421,7 +480,7 @@ export function AccountsView() {
     setHoldingManualPrice("");
     setMessage("Holding added.");
     setSaving(false);
-    await loadOverview();
+    await loadInvestments();
   }
 
   async function refreshPrices() {
@@ -442,7 +501,7 @@ export function AccountsView() {
 
     setMessage("Market prices refreshed.");
     setSaving(false);
-    await loadOverview();
+    await loadInvestments();
   }
 
   async function saveManualPrice(holding: InvestmentHolding) {
@@ -465,7 +524,7 @@ export function AccountsView() {
 
     setMessage(`Manual price updated for ${holding.symbol}.`);
     setSaving(false);
-    await loadOverview();
+    await loadInvestments();
   }
 
   async function removeHolding(holdingId: string) {
@@ -486,7 +545,7 @@ export function AccountsView() {
 
     setMessage("Holding removed.");
     setSaving(false);
-    await loadOverview();
+    await loadInvestments();
   }
 
   async function createSavingsGoal() {
@@ -523,13 +582,13 @@ export function AccountsView() {
     setGoalAccountId("");
     setMessage("Savings goal created.");
     setSaving(false);
-    await loadOverview();
+    await loadAccountsOverview();
   }
 
   const investmentTotalsByCurrency = useMemo(() => {
     const byCurrency = new Map<string, { value: number; costBasis: number; profitLoss: number }>();
 
-    for (const holding of overview?.holdings ?? []) {
+    for (const holding of investmentsData?.holdings ?? []) {
       const current = byCurrency.get(holding.accountCurrency) ?? { value: 0, costBasis: 0, profitLoss: 0 };
       current.value += holding.currentValue;
       current.costBasis += holding.costBasis;
@@ -538,12 +597,12 @@ export function AccountsView() {
     }
 
     return Array.from(byCurrency.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [overview?.holdings]);
+  }, [investmentsData?.holdings]);
 
   const groupedHoldings = useMemo<HoldingAccountGroup[]>(() => {
     const accountsMap = new Map<string, HoldingAccountGroup>();
 
-    for (const holding of overview?.holdings ?? []) {
+    for (const holding of investmentsData?.holdings ?? []) {
       const accountGroup = accountsMap.get(holding.accountId) ?? {
         accountId: holding.accountId,
         accountName: holding.accountName,
@@ -607,7 +666,7 @@ export function AccountsView() {
       .sort((a, b) => a.accountName.localeCompare(b.accountName));
 
     return grouped;
-  }, [overview?.holdings]);
+  }, [investmentsData?.holdings]);
 
   useEffect(() => {
     setExpandedHoldingAccounts((current) => {
@@ -661,36 +720,54 @@ export function AccountsView() {
               </option>
             ))}
           </select>
-          <Button type="button" onClick={() => void loadOverview()} disabled={loading || saving}>
+          <Button type="button" onClick={() => void refreshData()} disabled={loading || saving}>
             Refresh
           </Button>
         </div>
       </header>
 
-      {message ? (
-        <p className="rounded-lg border border-[#d5d9e0] bg-[#f6f7f9] px-4 py-2 text-sm text-[#1c2230]">{message}</p>
-      ) : null}
-
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label={`Net Worth (${overview?.summary.baseCurrency ?? currency})`}
-          value={asCurrencyBy(overview?.summary.netWorth ?? 0, overview?.summary.baseCurrency ?? currency)}
+          label={`Net Worth (${accountsOverview?.summary.baseCurrency ?? currency})`}
+          value={asCurrencyBy(accountsOverview?.summary.netWorth ?? 0, accountsOverview?.summary.baseCurrency ?? currency)}
         />
         <StatCard
-          label={`Snapshot Planned (${overview?.summary.baseCurrency ?? currency})`}
-          value={asCurrencyBy(overview?.summary.snapshotPlanned ?? 0, overview?.summary.baseCurrency ?? currency)}
+          label={`Snapshot Planned (${accountsOverview?.summary.baseCurrency ?? currency})`}
+          value={asCurrencyBy(accountsOverview?.summary.snapshotPlanned ?? 0, accountsOverview?.summary.baseCurrency ?? currency)}
         />
         <StatCard
-          label={`Snapshot Actual (${overview?.summary.baseCurrency ?? currency})`}
-          value={asCurrencyBy(overview?.summary.snapshotActual ?? 0, overview?.summary.baseCurrency ?? currency)}
+          label={`Snapshot Actual (${accountsOverview?.summary.baseCurrency ?? currency})`}
+          value={asCurrencyBy(accountsOverview?.summary.snapshotActual ?? 0, accountsOverview?.summary.baseCurrency ?? currency)}
         />
         <StatCard
           label="FX Pairs Used"
-          value={Object.keys(overview?.summary.exchangeRates ?? {}).sort().join(", ") || "-"}
+          value={Object.keys(accountsOverview?.summary.exchangeRates ?? {}).sort().join(", ") || "-"}
           tone="ui-text-muted"
         />
       </section>
 
+      <nav className="ui-border ui-surface flex flex-wrap gap-2 rounded-[20px] border p-2">
+        {ACCOUNTS_SUBPAGES.map((item) => (
+          <Link
+            key={item.value}
+            href={item.href}
+            className={`rounded-xl px-4 py-2 text-sm transition-colors ${
+              subpage === item.value
+                ? "bg-[#040426] text-white"
+                : "ui-text ui-hover-soft"
+            }`}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+
+      {message ? (
+        <p className="rounded-lg border border-[#d5d9e0] bg-[#f6f7f9] px-4 py-2 text-sm text-[#1c2230]">{message}</p>
+      ) : null}
+
+      {subpage === "general" ? (
+        <>
       <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
         <h2 className="ui-text-strong text-xl md:text-2xl font-medium">Accounts</h2>
         <p className="ui-text-muted mt-2 text-sm md:text-base">Create and monitor bank, savings, brokerage, and cash buckets.</p>
@@ -940,7 +1017,7 @@ export function AccountsView() {
               </tr>
             </thead>
             <tbody>
-              {(overview?.transfers ?? []).map((transfer) => (
+              {(accountsOverview?.transfers ?? []).map((transfer) => (
                 <tr key={transfer.id}>
                   {(() => {
                     const transferCurrency = accountCurrencyById.get(transfer.fromAccountId) ?? currency;
@@ -969,7 +1046,7 @@ export function AccountsView() {
             <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Monthly Account Snapshots</h2>
             <p className="mt-2 text-sm md:text-base text-[#73788d]">Maintain planned vs actual account balances.</p>
           </div>
-          <Button type="button" onClick={() => void saveSnapshots()} disabled={saving || !overview}>
+          <Button type="button" onClick={() => void saveSnapshots()} disabled={saving || !accountsOverview}>
             Save Snapshots
           </Button>
         </div>
@@ -1029,7 +1106,10 @@ export function AccountsView() {
           </table>
         </div>
       </section>
+        </>
+      ) : null}
 
+      {subpage === "investements" ? (
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -1294,7 +1374,9 @@ export function AccountsView() {
           </table>
         </div>
       </section>
+      ) : null}
 
+      {subpage === "savings" ? (
       <section className="rounded-[22px] border border-[#cfd3da] bg-[#f6f7f9] p-5 md:p-6">
         <h2 className="text-xl md:text-2xl font-medium text-[#171a24]">Savings Goals</h2>
         <p className="mt-2 text-sm md:text-base text-[#73788d]">Track emergency fund and long-term targets.</p>
@@ -1337,10 +1419,10 @@ export function AccountsView() {
         </div>
 
         <div className="mt-6 space-y-3">
-          {(overview?.savingsGoals ?? []).map((goal) => (
+          {(accountsOverview?.savingsGoals ?? []).map((goal) => (
             <article key={goal.id} className="ui-border ui-surface-soft rounded-[16px] border p-4">
               {(() => {
-                const goalCurrency = goal.accountId ? (accountCurrencyById.get(goal.accountId) ?? (overview?.summary.baseCurrency ?? currency)) : (overview?.summary.baseCurrency ?? currency);
+                const goalCurrency = goal.accountId ? (accountCurrencyById.get(goal.accountId) ?? (accountsOverview?.summary.baseCurrency ?? currency)) : (accountsOverview?.summary.baseCurrency ?? currency);
                 return (
                   <>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1367,6 +1449,7 @@ export function AccountsView() {
           ))}
         </div>
       </section>
+      ) : null}
 
       {loading ? <p className="text-sm text-[#6b7280]">Loading...</p> : null}
     </div>
