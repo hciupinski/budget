@@ -30,6 +30,15 @@ Local-first budgeting app with secure owner login, annual planning matrix, month
 
 Use `OWNER_EMAIL` and your configured owner password from `.env` to sign in.
 
+## Access from mobile (same Wi-Fi)
+1. Keep the stack running with `docker compose up --build`.
+2. Find your computer LAN IP (macOS):
+   - `ipconfig getifaddr en0`
+3. Open the web app on your phone:
+   - `http://<YOUR_LAN_IP>:3000`
+
+The web container is configured to bind on `0.0.0.0:3000` so it is reachable from other devices on your network.
+
 ## Epic 2 workflow
 1. Open **Annual Planner** and enter planned amounts for Jan-Dec.
 2. Save annual plan, or copy from previous year.

@@ -80,6 +80,8 @@ services:
         condition: service_started
     environment:
       NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
       API_BASE_URL: http://api:8080
     ports:
       - "3000:3000"
