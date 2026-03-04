@@ -203,7 +203,7 @@ export function AccountsView({ subpage = "general" }: { subpage?: AccountsSubpag
   const loadInvestments = useCallback(async () => {
     setLoadingInvestments(true);
 
-    const response = await fetch("/api/budget/assets/investments", {
+    const response = await fetch("/api/budget/assets/investments?refreshMode=auto", {
       method: "GET",
       cache: "no-store"
     });

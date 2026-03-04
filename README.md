@@ -14,6 +14,7 @@ Local-first budgeting app with secure owner login, annual planning matrix, month
    - `cp .env.example .env`
 2. Update at least:
    - `OWNER_PASSWORD`
+   - `OWNER_PASSWORD_HASH` (recommended for production; keep legacy plaintext only during transition)
    - `JWT_SECRET`
 3. Start stack:
    - `docker compose up --build`
@@ -27,7 +28,7 @@ Local-first budgeting app with secure owner login, annual planning matrix, month
 - Worker health: `http://localhost:8082/healthz`
 - Adminer: `http://localhost:8081`
 
-Use `OWNER_EMAIL` and `OWNER_PASSWORD` from `.env` to sign in.
+Use `OWNER_EMAIL` and your configured owner password from `.env` to sign in.
 
 ## Epic 2 workflow
 1. Open **Annual Planner** and enter planned amounts for Jan-Dec.

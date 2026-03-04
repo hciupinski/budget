@@ -1,21 +1,49 @@
-using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace Budget.Api.Modules.Auth;
 
-public interface IOwnerAuthService
+public sealed class OwnerAuthService(
+    IOptions<OwnerAccountOptions> options,
+    IPasswordHasher<object> passwordHasher,
+    ILogger<OwnerAuthService> logger)
+    : IOwnerAuthService
 {
-    bool ValidateCredentials(string email, string password);
-}
-
-public sealed class OwnerAuthService(IOptions<OwnerAccountOptions> options) : IOwnerAuthService
-{
+    private static readonly object PasswordHasherUser = new();
     private readonly OwnerAccountOptions _owner = options.Value;
 
-    public bool ValidateCredentials(string email, string password)
+    public OwnerCredentialValidationResult ValidateCredentials(string email, string password)
     {
-        return FixedTimeEquals(_owner.Email, email) && FixedTimeEquals(_owner.Password, password);
+        if (!FixedTimeEquals(_owner.Email, email))
+        {
+            return OwnerCredentialValidationResult.Invalid;
+        }
+
+        var legacyEnabled = _owner.AllowLegacyPlaintextPassword && !string.IsNullOrWhiteSpace(_owner.Password);
+
+        if (!string.IsNullOrWhiteSpace(_owner.PasswordHash))
+        {
+            var verificationResult = passwordHasher.VerifyHashedPassword(PasswordHasherUser, _owner.PasswordHash, password);
+            if (verificationResult is PasswordVerificationResult.Success or PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                return new OwnerCredentialValidationResult(true, false);
+            }
+
+            if (!legacyEnabled)
+            {
+                return OwnerCredentialValidationResult.Invalid;
+            }
+        }
+
+        if (legacyEnabled && FixedTimeEquals(_owner.Password ?? string.Empty, password))
+        {
+            logger.LogWarning("Legacy plaintext owner password verification path is active. Configure OwnerAccount:PasswordHash and disable OwnerAccount:AllowLegacyPlaintextPassword.");
+            return new OwnerCredentialValidationResult(true, true);
+        }
+
+        return OwnerCredentialValidationResult.Invalid;
     }
 
     private static bool FixedTimeEquals(string left, string right)

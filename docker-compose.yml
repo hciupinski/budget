@@ -43,6 +43,8 @@ services:
       ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       OwnerAccount__Email: ${OWNER_EMAIL}
       OwnerAccount__Password: ${OWNER_PASSWORD}
+      OwnerAccount__PasswordHash: ${OWNER_PASSWORD_HASH}
+      OwnerAccount__AllowLegacyPlaintextPassword: ${OWNER_ALLOW_LEGACY_PLAINTEXT_PASSWORD}
       Jwt__Issuer: ${JWT_ISSUER}
       Jwt__Audience: ${JWT_AUDIENCE}
       Jwt__Secret: ${JWT_SECRET}

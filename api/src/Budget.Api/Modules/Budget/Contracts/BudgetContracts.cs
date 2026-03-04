@@ -301,6 +301,7 @@ public sealed record CreateSavingsGoalRequest(
 public sealed record UpdateSavingsGoalRequest(
     string? Name,
     Guid? AccountId,
+    bool ClearAccountLink,
     decimal? TargetAmount,
     decimal? CurrentAmount,
     decimal? MonthlyContributionTarget,

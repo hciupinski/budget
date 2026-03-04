@@ -16,7 +16,8 @@ export async function POST(request: Request) {
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      "X-Login-Email": payload.email?.trim().toLowerCase() ?? ""
     },
     body: JSON.stringify({
       email: payload.email,
@@ -26,7 +27,11 @@ export async function POST(request: Request) {
   });
 
   if (!response.ok) {
-    return NextResponse.json({ error: "Invalid credentials" }, { status: response.status });
+    const message =
+      response.status === 429
+        ? "Too many login attempts. Please wait and try again."
+        : "Invalid credentials";
+    return NextResponse.json({ error: message }, { status: response.status });
   }
 
   const data = (await response.json()) as { accessToken: string };
