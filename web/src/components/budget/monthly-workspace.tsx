@@ -1,11 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { MONTH_LABELS, type MonthlyWorkspaceResponse } from "@/lib/budget-types";
 import { ChevronLeftIcon, ChevronRightIcon, SaveIcon, TrashIcon } from "@/components/budget/icons";
 import {
-  asCurrency,
   asSignedCurrency,
   differenceTone,
   sectionRowTone
@@ -35,6 +34,14 @@ import {
   type AnnualCustomItem,
   type MonthlyCustomItem
 } from "@/lib/planner-custom-items";
+import { useMonthlyWorkspaceState } from "@/components/budget/hooks/use-monthly-workspace-state";
+import { groupRowsBySection, resolveCustomSection } from "@/components/budget/planner-row-utils";
+import {
+  MonthlyMetricCard,
+  MonthlySummaryColumn,
+  MonthlyWorkspaceSummaryPanel,
+  MonthlyWorkspaceTablePanel
+} from "@/components/budget/monthly/monthly-presentational";
 
 type MonthlyDisplayRow = {
   rowId: string;
@@ -62,61 +69,6 @@ const STATUS_LABELS: Record<ActionStatus, string> = {
   PARTIAL: "Partial",
   SKIPPED: "Skipped"
 };
-
-function fallbackLabelFromKind(kind: ManagedSectionKind): string {
-  if (kind === "INCOME") {
-    return "Income";
-  }
-
-  if (kind === "BUSINESS_EXPENSES") {
-    return "Business Expenses";
-  }
-
-  if (kind === "PERSONAL_EXPENSES") {
-    return "Personal Expenses";
-  }
-
-  if (kind === "SAVINGS") {
-    return "Savings";
-  }
-
-  return "Investments";
-}
-
-function resolveCustomSection(
-  input: { sectionId: string; sectionKind: ManagedSectionKind },
-  sections: ManagedSection[]
-) {
-  const byId = sections.find((section) => section.id === input.sectionId);
-  if (byId) {
-    return {
-      id: byId.id,
-      name: byId.name,
-      kind: byId.kind,
-      order: byId.order,
-      sectionId: byId.id
-    };
-  }
-
-  const byKind = sections.find((section) => section.kind === input.sectionKind);
-  if (byKind) {
-    return {
-      id: byKind.id,
-      name: byKind.name,
-      kind: byKind.kind,
-      order: byKind.order,
-      sectionId: byKind.id
-    };
-  }
-
-  return {
-    id: `fallback-${input.sectionKind}`,
-    name: fallbackLabelFromKind(input.sectionKind),
-    kind: input.sectionKind,
-    order: 999,
-    sectionId: ""
-  };
-}
 
 function sectionFromKind(kind: ManagedSectionKind): "INCOME" | "COSTS" | "SAVINGS_INVESTMENTS" {
   if (kind === "INCOME") {
@@ -156,7 +108,13 @@ function mergeMonthlyCustomRowsFromAnnual(
   let updated = 0;
 
   for (const annualItem of annualForYear) {
-    const resolvedAnnual = resolveCustomSection(annualItem, sectionSettings);
+    const resolvedAnnual = resolveCustomSection(
+      {
+        sectionId: annualItem.sectionId,
+        sectionKind: annualItem.sectionKind
+      },
+      sectionSettings
+    );
     const annualKey = rowMatchKey(annualItem.name, resolvedAnnual.sectionId, resolvedAnnual.kind);
     const annualPlanned = annualItem.months[month - 1] ?? 0;
     const oneTimeKey = annualCustomOneTimeRowKey(year, annualItem.id);
@@ -171,7 +129,13 @@ function mergeMonthlyCustomRowsFromAnnual(
         return true;
       }
 
-      const resolvedMonthly = resolveCustomSection(monthlyItem, sectionSettings);
+      const resolvedMonthly = resolveCustomSection(
+        {
+          sectionId: monthlyItem.sectionId,
+          sectionKind: monthlyItem.sectionKind
+        },
+        sectionSettings
+      );
       const monthlyKey = rowMatchKey(monthlyItem.name, resolvedMonthly.sectionId, resolvedMonthly.kind);
       return monthlyKey === annualKey;
     });
@@ -222,63 +186,29 @@ export function MonthlyWorkspace() {
   const now = new Date();
   useCurrencySetting();
   const sectionSettings = useSectionSettings();
-  const [year, setYear] = useState<number>(now.getFullYear());
-  const [month, setMonth] = useState<number>(now.getMonth() + 1);
-  const [workspace, setWorkspace] = useState<MonthlyWorkspaceResponse | null>(null);
+  const {
+    year,
+    setYear,
+    month,
+    setMonth,
+    workspace,
+    setWorkspace,
+    loading,
+    saving,
+    message,
+    loadWorkspace,
+    saveAllActions
+  } = useMonthlyWorkspaceState(now.getFullYear(), now.getMonth() + 1);
   const [annualCustomItems, setAnnualCustomItems] = useState<AnnualCustomItem[]>([]);
   const [monthlyCustomItems, setMonthlyCustomItems] = useState<MonthlyCustomItem[]>([]);
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   const [hiddenApiRows, setHiddenApiRows] = useState<string[]>([]);
   const [oneTimeAnnualRows, setOneTimeAnnualRows] = useState<string[]>([]);
   const [editingName, setEditingName] = useState<{ rowId: string; value: string } | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [saving, setSaving] = useState<boolean>(false);
-  const [message, setMessage] = useState<string | null>(null);
-
-  function redirectToLoginIfUnauthorized(statusCode: number): boolean {
-    if (statusCode === 401) {
-      window.location.assign("/login");
-      return true;
-    }
-
-    return false;
-  }
-
-  const loadWorkspace = useCallback(async () => {
-    setLoading(true);
-    setMessage(null);
-
-    const syncResponse = await fetch(`/api/budget/months/${year}/${month}/generate`, {
-      method: "POST"
-    });
-
-    if (!syncResponse.ok && redirectToLoginIfUnauthorized(syncResponse.status)) {
-      return;
-    }
-
-    const response = await fetch(`/api/budget/months/${year}/${month}?status=ALL`, {
-      method: "GET",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      if (redirectToLoginIfUnauthorized(response.status)) {
-        return;
-      }
-
-      setWorkspace(null);
-      setMessage("Unable to load monthly planning data.");
-      setLoading(false);
-      return;
-    }
-
-    setWorkspace((await response.json()) as MonthlyWorkspaceResponse);
-    setLoading(false);
-  }, [month, year]);
 
   useEffect(() => {
-    void loadWorkspace();
-  }, [loadWorkspace]);
+    void loadWorkspace(year, month);
+  }, [loadWorkspace, month, year]);
 
   useEffect(() => {
     function syncLocalRows() {
@@ -360,7 +290,13 @@ export function MonthlyWorkspace() {
     }
 
     for (const item of monthlyForCurrentPeriod) {
-      const resolved = resolveCustomSection(item, sectionSettings);
+      const resolved = resolveCustomSection(
+        {
+          sectionId: item.sectionId,
+          sectionKind: item.sectionKind
+        },
+        sectionSettings
+      );
 
       rows.push({
         rowId: `monthly-custom-${item.id}`,
@@ -379,48 +315,7 @@ export function MonthlyWorkspace() {
   }, [hiddenApiRows, month, monthlyCustomItems, nameOverrides, oneTimeAnnualRows, sectionSettings, workspace?.actions, year]);
 
   const groupedRows = useMemo(() => {
-    const groupedMap = new Map<
-      string,
-      {
-        id: string;
-        label: string;
-        kind: ManagedSectionKind;
-        order: number;
-        sectionId: string;
-        rows: MonthlyDisplayRow[];
-      }
-    >();
-
-    for (const section of [...sectionSettings].sort((a, b) => a.order - b.order)) {
-      groupedMap.set(section.id, {
-        id: section.id,
-        label: section.name,
-        kind: section.kind,
-        order: section.order,
-        sectionId: section.id,
-        rows: []
-      });
-    }
-
-    for (const row of rowsWithMeta) {
-      const existing = groupedMap.get(row.resolvedSection.id);
-
-      if (existing) {
-        existing.rows.push(row);
-        continue;
-      }
-
-      groupedMap.set(row.resolvedSection.id, {
-        id: row.resolvedSection.id,
-        label: row.resolvedSection.name,
-        kind: row.resolvedSection.kind,
-        order: row.resolvedSection.order,
-        sectionId: row.resolvedSection.sectionId,
-        rows: [row]
-      });
-    }
-
-    return Array.from(groupedMap.values()).sort((a, b) => a.order - b.order);
+    return groupRowsBySection(rowsWithMeta, sectionSettings);
   }, [rowsWithMeta, sectionSettings]);
 
   function updateApiRow(actionId: string, change: Partial<MonthlyWorkspaceResponse["actions"][number]>) {
@@ -500,49 +395,12 @@ export function MonthlyWorkspace() {
     }
   }
 
-  async function saveAllActions() {
+  async function onSaveAllActions() {
     if (!workspace) {
       return;
     }
 
-    setSaving(true);
-    setMessage(null);
-
-    let completed = 0;
-
-    for (const action of workspace.actions) {
-      const actualAmountForSave =
-        action.status === "DONE" && action.actualAmount === null
-          ? action.plannedAmount
-          : action.actualAmount;
-
-      const response = await fetch(`/api/budget/months/${year}/${month}/actions/${action.actionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          status: action.status,
-          actualAmount: actualAmountForSave
-        })
-      });
-
-      if (!response.ok) {
-        if (redirectToLoginIfUnauthorized(response.status)) {
-          return;
-        }
-
-        setSaving(false);
-        setMessage(`Failed to save ${action.categoryName}.`);
-        return;
-      }
-
-      completed += 1;
-    }
-
-    setSaving(false);
-    setMessage(`Saved ${completed} monthly items.`);
-    await loadWorkspace();
+    await saveAllActions(workspace.actions);
   }
 
   function shiftMonth(direction: -1 | 1) {
@@ -672,7 +530,7 @@ export function MonthlyWorkspace() {
           <button
             type="button"
             className="ui-btn-primary inline-flex h-12 items-center gap-2 rounded-2xl px-5 text-sm disabled:opacity-60 md:text-base"
-            onClick={() => void saveAllActions()}
+            onClick={() => void onSaveAllActions()}
             disabled={!workspace || saving || loading}
           >
             <SaveIcon size={20} />
@@ -681,7 +539,12 @@ export function MonthlyWorkspace() {
         </div>
       </header>
 
-      {message ? <p className="ui-text-muted text-sm md:text-base">{message}</p> : null}
+      {message ? (
+        <p className="ui-text-muted text-sm md:text-base">
+          {message.message}
+          {message.details ? ` ${message.details}` : ""}
+        </p>
+      ) : null}
       {loading ? <p className="ui-text-muted text-sm md:text-base">Loading monthly plan...</p> : null}
 
       {workspace ? (
@@ -715,6 +578,7 @@ export function MonthlyWorkspace() {
             />
           </section>
 
+          <MonthlyWorkspaceTablePanel>
           <section className="ui-border ui-surface overflow-hidden rounded-[22px] border">
             <div className="ui-border border-b p-5 md:p-6">
               <h2 className="ui-text-strong text-xl font-medium md:text-2xl">Budget Items for {MONTH_LABELS[month - 1]} {year}</h2>
@@ -922,12 +786,14 @@ export function MonthlyWorkspace() {
               </table>
             </div>
           </section>
+          </MonthlyWorkspaceTablePanel>
 
+          <MonthlyWorkspaceSummaryPanel>
           <section className="ui-border ui-surface rounded-[22px] border p-5 md:p-6">
             <h2 className="ui-text-strong text-xl font-medium md:text-2xl">Monthly Summary - {MONTH_LABELS[month - 1]} {year}</h2>
 
             <div className="mt-6 grid gap-8 xl:grid-cols-2">
-              <SummaryColumn
+              <MonthlySummaryColumn
                 label="BUDGETED"
                 income={summary.incomePlanned}
                 business={summary.businessCostsPlanned}
@@ -935,7 +801,7 @@ export function MonthlyWorkspace() {
                 savings={summary.savingsInvestPlanned}
                 remainder={summary.remainderPlanned}
               />
-              <SummaryColumn
+              <MonthlySummaryColumn
                 label="ACTUAL"
                 income={summary.incomeActual}
                 business={summary.businessCostsActual}
@@ -945,86 +811,9 @@ export function MonthlyWorkspace() {
               />
             </div>
           </section>
+          </MonthlyWorkspaceSummaryPanel>
         </>
       ) : null}
-    </div>
-  );
-}
-
-function MonthlyMetricCard({
-  label,
-  planned,
-  actual,
-  valueTone,
-  danger = false
-}: {
-  label: string;
-  planned: number;
-  actual: number;
-  valueTone: string;
-  danger?: boolean;
-}) {
-  return (
-    <div className={`ui-surface rounded-[20px] border p-4 ${danger ? "border-[#f43f5e]" : "ui-border"}`}>
-      <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
-      <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(planned)}</p>
-      <p className="ui-text-muted mt-1 text-sm md:text-base">
-        Actual: <span className={valueTone}>{asCurrency(actual)}</span>
-      </p>
-    </div>
-  );
-}
-
-function SummaryColumn({
-  label,
-  income,
-  business,
-  personal,
-  savings,
-  remainder
-}: {
-  label: string;
-  income: number;
-  business: number;
-  personal: number;
-  savings: number;
-  remainder: number;
-}) {
-  const transfer = income - business;
-
-  return (
-    <div className="space-y-4">
-      <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
-
-      <SummaryLine label="Total Business Income" value={income} valueTone="text-[#10a34a]" />
-      <SummaryLine label="- Business Expenses" value={-business} valueTone="text-[#8f30ff]" />
-
-      <div className="ui-border border-t" />
-
-      <SummaryLine label="Transfer to Personal" value={transfer} valueTone="text-[#10a34a]" />
-      <SummaryLine label="- Personal Expenses" value={-personal} valueTone="text-[#f35b00]" />
-      <SummaryLine label="- Savings" value={-savings} valueTone="text-[#2563eb]" />
-
-      <div className="ui-border border-t" />
-
-      <SummaryLine label="Remainder" value={remainder} valueTone={remainder >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"} />
-    </div>
-  );
-}
-
-function SummaryLine({
-  label,
-  value,
-  valueTone
-}: {
-  label: string;
-  value: number;
-  valueTone: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-sm md:text-base">
-      <p className="ui-text-muted">{label}</p>
-      <p className={valueTone}>{asSignedCurrency(value)}</p>
     </div>
   );
 }

@@ -7,11 +7,6 @@ using System.Text;
 
 namespace Budget.Api.Infrastructure.Security;
 
-public interface IJwtTokenFactory
-{
-    string CreateToken(string email);
-}
-
 public sealed class JwtTokenFactory(IOptions<JwtOptions> options) : IJwtTokenFactory
 {
     private readonly JwtOptions _options = options.Value;

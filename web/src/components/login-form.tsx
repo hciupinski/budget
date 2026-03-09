@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { login } from "@/lib/api-clients/auth-api";
+import { toUserFeedback } from "@/lib/http/user-feedback";
 
 export function LoginForm() {
   const router = useRouter();
@@ -21,22 +23,15 @@ export function LoginForm() {
     const email = String(form.get("email") ?? "");
     const password = String(form.get("password") ?? "");
 
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ email, password })
-    });
-
-    if (!response.ok) {
-      setError("Invalid credentials.");
+    try {
+      await login(email, password);
+      router.push("/");
+      router.refresh();
+    } catch (error) {
+      setError(toUserFeedback(error, "Invalid credentials.").message);
+    } finally {
       setPending(false);
-      return;
     }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (
