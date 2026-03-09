@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-15432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -27,7 +27,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8081:8080"
+      - "${ADMINER_HOST_PORT:-18081}:8080"
 
   api:
     build:
@@ -49,9 +49,9 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE}
       Jwt__Secret: ${JWT_SECRET}
       Jwt__ExpiresMinutes: ${JWT_EXPIRES_MINUTES}
-      AllowedOrigins: ${ALLOWED_ORIGINS}
+      AllowedOrigins: ${ALLOWED_ORIGINS:-http://localhost:13000}
     ports:
-      - "8080:8080"
+      - "${API_HOST_PORT:-18080}:8080"
 
   worker:
     build:
@@ -67,7 +67,7 @@ services:
       ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       Worker__IntervalSeconds: ${WORKER_INTERVAL_SECONDS}
     ports:
-      - "8082:8082"
+      - "${WORKER_HOST_PORT:-18082}:8082"
 
   web:
     build:
@@ -84,7 +84,7 @@ services:
       PORT: 3000
       API_BASE_URL: http://api:8080
     ports:
-      - "3000:3000"
+      - "${WEB_HOST_PORT:-13000}:3000"
 
 volumes:
   postgres_data:

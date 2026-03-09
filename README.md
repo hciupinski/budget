@@ -16,17 +16,18 @@ Local-first budgeting app with secure owner login, annual planning matrix, month
    - `OWNER_PASSWORD`
    - `OWNER_PASSWORD_HASH` (recommended for production; keep legacy plaintext only during transition)
    - `JWT_SECRET`
+   - (optional) host ports like `WEB_HOST_PORT`, `API_HOST_PORT`, `DB_HOST_PORT` if you want custom mappings
 3. Start stack:
    - `docker compose up --build`
 
 ## URLs
-- Web app: `http://localhost:3000`
-- Annual Planner page: `http://localhost:3000/annual`
-- Monthly Workspace page: `http://localhost:3000/monthly`
-- Accounts page: `http://localhost:3000/accounts`
-- API health: `http://localhost:8080/healthz`
-- Worker health: `http://localhost:8082/healthz`
-- Adminer: `http://localhost:8081`
+- Web app: `http://localhost:13000`
+- Annual Planner page: `http://localhost:13000/annual`
+- Monthly Workspace page: `http://localhost:13000/monthly`
+- Accounts page: `http://localhost:13000/accounts`
+- API health: `http://localhost:18080/healthz`
+- Worker health: `http://localhost:18082/healthz`
+- Adminer: `http://localhost:18081`
 
 Use `OWNER_EMAIL` and your configured owner password from `.env` to sign in.
 
@@ -35,9 +36,9 @@ Use `OWNER_EMAIL` and your configured owner password from `.env` to sign in.
 2. Find your computer LAN IP (macOS):
    - `ipconfig getifaddr en0`
 3. Open the web app on your phone:
-   - `http://<YOUR_LAN_IP>:3000`
+   - `http://<YOUR_LAN_IP>:13000`
 
-The web container is configured to bind on `0.0.0.0:3000` so it is reachable from other devices on your network.
+The web container binds on `0.0.0.0:3000` internally and is published on `WEB_HOST_PORT` (default `13000`), so it is reachable from other devices on your network.
 
 ## Epic 2 workflow
 1. Open **Annual Planner** and enter planned amounts for Jan-Dec.
