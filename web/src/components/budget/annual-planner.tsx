@@ -55,6 +55,11 @@ type AnnualDisplayRow = {
   };
 };
 
+const SECTION_COLUMN_WIDTH = 140;
+const ITEM_COLUMN_WIDTH = 200;
+const ACTION_COLUMN_WIDTH = 84;
+const MONTH_COLUMN_WIDTH = 76;
+
 function hasNonZero(value: number): boolean {
   return Math.abs(value) > 0.000001;
 }
@@ -170,6 +175,9 @@ export function AnnualPlanner() {
   const groupedRows = useMemo(() => {
     return groupRowsBySection(rowsWithMeta, sectionSettings);
   }, [rowsWithMeta, sectionSettings]);
+  const itemColumnLeft = SECTION_COLUMN_WIDTH;
+  const actionColumnLeft = SECTION_COLUMN_WIDTH + ITEM_COLUMN_WIDTH;
+  const tableMinWidth = SECTION_COLUMN_WIDTH + ITEM_COLUMN_WIDTH + ACTION_COLUMN_WIDTH + MONTH_COLUMN_WIDTH * MONTH_LABELS.length;
 
   function updateApiCell(categoryId: string, monthIndex: number, nextValue: number) {
     if (!annualPlan) {
@@ -462,22 +470,32 @@ export function AnnualPlanner() {
           <AnnualPlannerTablePanel>
           <section className="ui-border ui-surface overflow-hidden rounded-[22px] border">
             <div className="max-w-full overflow-x-auto">
-              <table className="w-max min-w-full border-collapse">
+              <table className="w-full min-w-[1336px] table-fixed border-collapse" style={{ minWidth: tableMinWidth }}>
                 <thead>
                   <tr className="bg-[#eceef2]">
-                    <th className="sticky left-0 z-40 min-w-[170px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">
+                    <th
+                      className="sticky left-0 z-40 border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base"
+                      style={{ width: SECTION_COLUMN_WIDTH, minWidth: SECTION_COLUMN_WIDTH }}
+                    >
                       Section
                     </th>
-                    <th className="sticky left-[170px] z-40 min-w-[250px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base">
+                    <th
+                      className="sticky z-40 border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-left text-sm font-semibold text-[#171b25] md:text-base"
+                      style={{ left: itemColumnLeft, width: ITEM_COLUMN_WIDTH, minWidth: ITEM_COLUMN_WIDTH }}
+                    >
                       Item
                     </th>
-                    <th className="sticky left-[420px] z-40 w-[110px] min-w-[110px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base">
+                    <th
+                      className="sticky z-40 border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base"
+                      style={{ left: actionColumnLeft, width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH }}
+                    >
                       Action
                     </th>
                     {MONTH_LABELS.map((label) => (
                       <th
                         key={label}
-                        className="w-[108px] min-w-[108px] border-b border-[#cdd2da] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base"
+                        className="border-b border-[#cdd2da] px-2 py-3 text-center text-sm font-semibold text-[#171b25] md:text-base"
+                        style={{ width: MONTH_COLUMN_WIDTH, minWidth: MONTH_COLUMN_WIDTH }}
                       >
                         {label}
                       </th>
@@ -489,10 +507,16 @@ export function AnnualPlanner() {
                     <Fragment key={group.id}>
                       {group.rows.length === 0 ? (
                         <tr key={`${group.id}-empty`} className={sectionRowTone(group.kind)}>
-                          <td className="sticky left-0 z-30 min-w-[170px] border-b border-[#cad0d8] bg-inherit px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base">
+                          <td
+                            className="sticky left-0 z-30 border-b border-[#cad0d8] bg-inherit px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
+                            style={{ width: SECTION_COLUMN_WIDTH, minWidth: SECTION_COLUMN_WIDTH }}
+                          >
                             {group.label}
                           </td>
-                          <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cad0d8] bg-inherit px-4 py-3">
+                          <td
+                            className="sticky z-20 border-b border-[#cad0d8] bg-inherit px-4 py-3"
+                            style={{ left: itemColumnLeft, width: ITEM_COLUMN_WIDTH, minWidth: ITEM_COLUMN_WIDTH }}
+                          >
                             <button
                               type="button"
                               onClick={() => addRow(group.sectionId, group.kind)}
@@ -501,7 +525,10 @@ export function AnnualPlanner() {
                               + add item
                             </button>
                           </td>
-                          <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
+                          <td
+                            className="sticky z-20 border-b border-[#cad0d8] bg-inherit px-2 py-3"
+                            style={{ left: actionColumnLeft, width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH }}
+                          />
                           <td className="border-b border-[#cad0d8] px-2 py-3" colSpan={MONTH_LABELS.length} />
                         </tr>
                       ) : (
@@ -511,13 +538,17 @@ export function AnnualPlanner() {
                               {index === 0 ? (
                                 <td
                                   rowSpan={group.rows.length + 1}
-                                  className="sticky left-0 z-30 min-w-[170px] border-b border-[#cad0d8] bg-inherit px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
+                                  className="sticky left-0 z-30 border-b border-[#cad0d8] bg-inherit px-4 py-3 align-top text-sm text-[#1b1f2b] md:text-base"
+                                  style={{ width: SECTION_COLUMN_WIDTH, minWidth: SECTION_COLUMN_WIDTH }}
                                 >
                                   {group.label}
                                 </td>
                               ) : null}
 
-                              <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cad0d8] bg-inherit px-4 py-3 text-sm text-[#1b1f2b] md:text-base">
+                              <td
+                                className="sticky z-20 border-b border-[#cad0d8] bg-inherit px-4 py-3 text-sm text-[#1b1f2b] md:text-base"
+                                style={{ left: itemColumnLeft, width: ITEM_COLUMN_WIDTH, minWidth: ITEM_COLUMN_WIDTH }}
+                              >
                                 <div className="flex items-center gap-2">
                                   {editingName?.rowId === row.rowId ? (
                                     <Input
@@ -548,7 +579,8 @@ export function AnnualPlanner() {
                                     <button
                                       type="button"
                                       onClick={() => setEditingName({ rowId: row.rowId, value: row.name })}
-                                      className="text-left underline decoration-dotted underline-offset-4"
+                                      className="line-clamp-2 text-left underline decoration-dotted underline-offset-4"
+                                      title={row.name}
                                     >
                                       {row.name}
                                     </button>
@@ -556,7 +588,10 @@ export function AnnualPlanner() {
                                 </div>
                               </td>
 
-                              <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cad0d8] bg-inherit px-2 py-3 text-center">
+                              <td
+                                className="sticky z-20 border-b border-[#cad0d8] bg-inherit px-2 py-3 text-center"
+                                style={{ left: actionColumnLeft, width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH }}
+                              >
                                 <div className="mx-auto flex items-center justify-center gap-1">
                                   <button
                                     type="button"
@@ -588,11 +623,15 @@ export function AnnualPlanner() {
                               </td>
 
                               {row.months.map((monthValue, monthIndex) => (
-                                <td key={`${row.rowId}-${monthIndex}`} className="border-b border-[#cad0d8] px-2 py-3">
+                                <td
+                                  key={`${row.rowId}-${monthIndex}`}
+                                  className="border-b border-[#cad0d8] px-1.5 py-2.5"
+                                  style={{ width: MONTH_COLUMN_WIDTH, minWidth: MONTH_COLUMN_WIDTH }}
+                                >
                                   <Input
                                     type="number"
                                     step="0.01"
-                                    className="numeric-input h-10 min-w-[96px] rounded-xl border-0 bg-[#eff1f4] text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
+                                    className="numeric-input h-9 min-w-0 rounded-xl border-0 bg-[#eff1f4] px-2 text-center text-sm font-medium text-[#1f2430] shadow-none md:text-base"
                                     value={monthValue}
                                     onChange={(event) => {
                                       const parsed = Number.parseFloat(event.target.value);
@@ -627,7 +666,10 @@ export function AnnualPlanner() {
                           ))}
 
                           <tr key={`${group.id}-add`} className={sectionRowTone(group.kind)}>
-                            <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cad0d8] bg-inherit px-4 py-3">
+                            <td
+                              className="sticky z-20 border-b border-[#cad0d8] bg-inherit px-4 py-3"
+                              style={{ left: itemColumnLeft, width: ITEM_COLUMN_WIDTH, minWidth: ITEM_COLUMN_WIDTH }}
+                            >
                               <button
                                 type="button"
                                 onClick={() => addRow(group.sectionId, group.kind)}
@@ -636,7 +678,10 @@ export function AnnualPlanner() {
                                 + add item
                               </button>
                             </td>
-                            <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cad0d8] bg-inherit px-2 py-3" />
+                            <td
+                              className="sticky z-20 border-b border-[#cad0d8] bg-inherit px-2 py-3"
+                              style={{ left: actionColumnLeft, width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH }}
+                            />
                             <td className="border-b border-[#cad0d8] px-2 py-3" colSpan={MONTH_LABELS.length} />
                           </tr>
                         </>
@@ -645,19 +690,29 @@ export function AnnualPlanner() {
                   ))}
 
                   <tr className="bg-[#eceef2]">
-                    <td className="sticky left-0 z-30 min-w-[170px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base">
+                    <td
+                      className="sticky left-0 z-30 border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base"
+                      style={{ width: SECTION_COLUMN_WIDTH, minWidth: SECTION_COLUMN_WIDTH }}
+                    >
                       Summary
                     </td>
-                    <td className="sticky left-[170px] z-20 min-w-[250px] border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base">
+                    <td
+                      className="sticky z-20 border-b border-[#cdd2da] bg-[#eceef2] px-4 py-3 text-sm font-semibold text-[#171b25] md:text-base"
+                      style={{ left: itemColumnLeft, width: ITEM_COLUMN_WIDTH, minWidth: ITEM_COLUMN_WIDTH }}
+                    >
                       Monthly Remainder
                     </td>
-                    <td className="sticky left-[420px] z-20 w-[110px] min-w-[110px] border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3" />
+                    <td
+                      className="sticky z-20 border-b border-[#cdd2da] bg-[#eceef2] px-2 py-3"
+                      style={{ left: actionColumnLeft, width: ACTION_COLUMN_WIDTH, minWidth: ACTION_COLUMN_WIDTH }}
+                    />
                     {monthlyRemainders.map((monthValue, monthIndex) => (
                       <td
                         key={`monthly-remainder-${monthIndex + 1}`}
                         className={`border-b border-[#cdd2da] px-2 py-3 text-center text-sm font-medium md:text-base ${
                           monthValue >= 0 ? "text-[#10a34a]" : "text-[#e11d48]"
                         }`}
+                        style={{ width: MONTH_COLUMN_WIDTH, minWidth: MONTH_COLUMN_WIDTH }}
                       >
                         {asSignedCurrency(monthValue)}
                       </td>

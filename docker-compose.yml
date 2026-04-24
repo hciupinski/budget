@@ -50,6 +50,10 @@ services:
       Jwt__Secret: ${JWT_SECRET}
       Jwt__ExpiresMinutes: ${JWT_EXPIRES_MINUTES}
       AllowedOrigins: ${ALLOWED_ORIGINS:-http://localhost:13000}
+      ProjectDocuments__RootPath: /app/data/documents
+      ProjectDocuments__MaxFileSizeBytes: 26214400
+    volumes:
+      - ${PROJECT_DOCUMENTS_ROOT:?PROJECT_DOCUMENTS_ROOT must be set}:/app/data/documents
     ports:
       - "${API_HOST_PORT:-18080}:8080"
 

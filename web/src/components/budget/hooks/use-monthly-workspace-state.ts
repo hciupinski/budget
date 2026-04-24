@@ -12,7 +12,6 @@ import { toUserFeedback, type UserFeedback } from "@/lib/http/user-feedback";
 type SaveActionItem = {
   actionId: string;
   categoryName: string;
-  plannedAmount: number;
   actualAmount: number | null;
   status: ActionStatus;
 };
@@ -91,15 +90,10 @@ export function useMonthlyWorkspaceState(initialYear: number, initialMonth: numb
 
       try {
         const results = await runWithConcurrency(actions, 4, async (action): Promise<SaveActionResult> => {
-          const actualAmountForSave =
-            action.status === "DONE" && action.actualAmount === null
-              ? action.plannedAmount
-              : action.actualAmount;
-
           try {
             await updateMonthlyAction(year, month, action.actionId, {
               status: action.status,
-              actualAmount: actualAmountForSave
+              actualAmount: action.actualAmount
             });
 
             return {

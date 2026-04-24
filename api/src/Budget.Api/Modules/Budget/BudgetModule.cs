@@ -1,6 +1,8 @@
 using Budget.Api.Infrastructure.Persistence;
+using Budget.Api.Infrastructure.Storage;
 using Budget.Api.Modules.Budget.Endpoints;
 using Budget.Api.Modules.Budget.Services;
+using Budget.Api.Modules.Budget.Services.Projects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Budget.Api.Modules.Budget;
@@ -26,6 +28,14 @@ public static class BudgetModule
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IAccountsService, AccountsService>();
         services.AddScoped<IInvestmentsService, InvestmentsService>();
+        services.AddScoped<IProjectPlannerService, ProjectPlannerService>();
+        services.AddScoped<IProjectDocumentStorage, ProjectDocumentStorage>();
+        services.AddHostedService<ProjectDocumentsStartupValidator>();
+        services.AddOptions<ProjectDocumentsOptions>()
+            .Bind(configuration.GetSection(ProjectDocumentsOptions.SectionName))
+            .ValidateDataAnnotations()
+            .Validate(x => !string.IsNullOrWhiteSpace(x.RootPath), "ProjectDocuments:RootPath is required.")
+            .ValidateOnStart();
 
         services.AddMemoryCache();
         services.AddOptions<MarketPricesOptions>()
@@ -58,6 +68,7 @@ public static class BudgetModule
         group.MapBudgetMonthlyWorkspaceEndpoints();
         group.MapBudgetAuditEndpoints();
         group.MapBudgetAssetsEndpoints();
+        group.MapBudgetProjectsEndpoints();
 
         return app;
     }

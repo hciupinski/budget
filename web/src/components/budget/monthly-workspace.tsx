@@ -319,20 +319,22 @@ export function MonthlyWorkspace() {
   }, [rowsWithMeta, sectionSettings]);
 
   function updateApiRow(actionId: string, change: Partial<MonthlyWorkspaceResponse["actions"][number]>) {
-    if (!workspace) {
-      return;
-    }
+    setWorkspace((current) => {
+      if (!current) {
+        return current;
+      }
 
-    setWorkspace({
-      ...workspace,
-      actions: workspace.actions.map((action) =>
-        action.actionId === actionId
-          ? {
-              ...action,
-              ...change
-            }
-          : action
-      )
+      return {
+        ...current,
+        actions: current.actions.map((action) =>
+          action.actionId === actionId
+            ? {
+                ...action,
+                ...change
+              }
+            : action
+        )
+      };
     });
   }
 
@@ -738,20 +740,17 @@ export function MonthlyWorkspace() {
                                     value={row.status}
                                     onChange={(event) => {
                                       const nextStatus = event.target.value as ActionStatus;
-                                      const shouldFillActual = nextStatus === "DONE" && row.actualAmount === null;
 
                                       if (row.source === "api" && row.actionId) {
                                         updateApiRow(row.actionId, {
-                                          status: nextStatus,
-                                          ...(shouldFillActual ? { actualAmount: row.plannedAmount } : {})
+                                          status: nextStatus
                                         });
                                         return;
                                       }
 
                                       if (row.source === "monthlyCustom" && row.monthlyCustomId) {
                                         updateMonthlyCustomRow(row.monthlyCustomId, {
-                                          status: nextStatus,
-                                          ...(shouldFillActual ? { actualAmount: row.plannedAmount } : {})
+                                          status: nextStatus
                                         });
                                       }
                                     }}

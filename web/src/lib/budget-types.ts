@@ -199,3 +199,115 @@ export type AssetsInvestmentsResponse = {
   investments: AssetsOverviewResponse["investments"];
   priceRefreshMeta: InvestmentPriceRefreshMeta;
 };
+
+export type ProjectCompletionStatus = "ACTIVE" | "DONE";
+export type ProjectCompletionSource = "AUTO" | "MANUAL";
+export type ProjectAttachmentKind = "AGREEMENT" | "RECEIPT" | "DOCUMENT";
+
+export type ProjectTotals = {
+  planned: number;
+  paid: number;
+  manualAdjustment: number;
+  actual: number;
+  variance: number;
+};
+
+export type ProjectCompletionSummary = {
+  activeMilestones: number;
+  completedMilestones: number;
+  activeSteps: number;
+  completedSteps: number;
+  openItems: number;
+  doneItems: number;
+};
+
+export type ProjectAttachment = {
+  id: string;
+  itemId: string;
+  paymentId: string | null;
+  kind: ProjectAttachmentKind;
+  mimeType: string;
+  sizeBytes: number;
+  originalName: string;
+  createdAt: string;
+  isRemoved: boolean;
+  removedAt: string | null;
+  downloadPath: string;
+};
+
+export type ProjectPayment = {
+  id: string;
+  amount: number;
+  paymentDate: string;
+  note: string;
+  isArchived: boolean;
+  updatedAt: string;
+};
+
+export type ProjectItem = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  plannedAmount: number;
+  paidAmount: number;
+  manualAdjustment: number;
+  actualAmount: number;
+  variance: number;
+  isDone: boolean;
+  doneAt: string | null;
+  payments: ProjectPayment[];
+  attachments: ProjectAttachment[];
+};
+
+export type ProjectStep = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  completionStatus: ProjectCompletionStatus;
+  completionSource: ProjectCompletionSource;
+  completedAt: string | null;
+  totals: ProjectTotals;
+  completion: ProjectCompletionSummary;
+  items: ProjectItem[];
+};
+
+export type ProjectMilestone = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  completionStatus: ProjectCompletionStatus;
+  completionSource: ProjectCompletionSource;
+  completedAt: string | null;
+  totals: ProjectTotals;
+  completion: ProjectCompletionSummary;
+  steps: ProjectStep[];
+};
+
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  currency: "PLN" | "USD" | "EUR";
+  isArchived: boolean;
+  totals: ProjectTotals;
+  completion: ProjectCompletionSummary;
+  updatedAt: string;
+};
+
+export type ProjectsListResponse = {
+  projects: ProjectSummary[];
+};
+
+export type ProjectDetailResponse = {
+  id: string;
+  name: string;
+  description: string;
+  currency: "PLN" | "USD" | "EUR";
+  sortOrder: number;
+  isArchived: boolean;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  totals: ProjectTotals;
+  completion: ProjectCompletionSummary;
+  milestones: ProjectMilestone[];
+};

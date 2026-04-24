@@ -1,4 +1,5 @@
 using Budget.Api.Modules.Budget.Domain;
+using Budget.Api.Modules.Budget.Domain.Projects;
 using Microsoft.EntityFrameworkCore;
 
 namespace Budget.Api.Infrastructure.Persistence;
@@ -15,6 +16,12 @@ public sealed class BudgetDbContext(DbContextOptions<BudgetDbContext> options) :
     public DbSet<AccountSnapshot> AccountSnapshots => Set<AccountSnapshot>();
     public DbSet<InvestmentHolding> InvestmentHoldings => Set<InvestmentHolding>();
     public DbSet<SavingsGoal> SavingsGoals => Set<SavingsGoal>();
+    public DbSet<BudgetProject> Projects => Set<BudgetProject>();
+    public DbSet<ProjectMilestone> ProjectMilestones => Set<ProjectMilestone>();
+    public DbSet<ProjectStep> ProjectSteps => Set<ProjectStep>();
+    public DbSet<ProjectCostItem> ProjectItems => Set<ProjectCostItem>();
+    public DbSet<ProjectPayment> ProjectPayments => Set<ProjectPayment>();
+    public DbSet<ProjectAttachment> ProjectAttachments => Set<ProjectAttachment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -166,6 +173,142 @@ public sealed class BudgetDbContext(DbContextOptions<BudgetDbContext> options) :
             entity.HasOne(x => x.Account)
                 .WithMany(x => x.SavingsGoals)
                 .HasForeignKey(x => x.AccountId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<BudgetProject>(entity =>
+        {
+            entity.ToTable("budget_projects");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(180).IsRequired();
+            entity.Property(x => x.Description).HasColumnName("description").HasMaxLength(4000).IsRequired();
+            entity.Property(x => x.Currency).HasColumnName("currency").HasMaxLength(10).IsRequired();
+            entity.Property(x => x.SortOrder).HasColumnName("sort_order").IsRequired();
+            entity.Property(x => x.IsArchived).HasColumnName("is_archived").IsRequired();
+            entity.Property(x => x.ArchivedAt).HasColumnName("archived_at");
+            entity.Property(x => x.ArchivedBy).HasColumnName("archived_by").HasMaxLength(180);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.HasIndex(x => new { x.IsArchived, x.SortOrder, x.Name });
+        });
+
+        modelBuilder.Entity<ProjectMilestone>(entity =>
+        {
+            entity.ToTable("project_milestones");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.ProjectId).HasColumnName("project_id").IsRequired();
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(220).IsRequired();
+            entity.Property(x => x.SortOrder).HasColumnName("sort_order").IsRequired();
+            entity.Property(x => x.CompletionStatus).HasColumnName("completion_status").HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.CompletionSource).HasColumnName("completion_source").HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.CompletedAt).HasColumnName("completed_at");
+            entity.Property(x => x.IsArchived).HasColumnName("is_archived").IsRequired();
+            entity.Property(x => x.ArchivedAt).HasColumnName("archived_at");
+            entity.Property(x => x.ArchivedBy).HasColumnName("archived_by").HasMaxLength(180);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.HasIndex(x => new { x.ProjectId, x.IsArchived, x.CompletionStatus, x.SortOrder });
+            entity.HasOne(x => x.Project)
+                .WithMany(x => x.Milestones)
+                .HasForeignKey(x => x.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectStep>(entity =>
+        {
+            entity.ToTable("project_steps");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.MilestoneId).HasColumnName("milestone_id").IsRequired();
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(220).IsRequired();
+            entity.Property(x => x.SortOrder).HasColumnName("sort_order").IsRequired();
+            entity.Property(x => x.CompletionStatus).HasColumnName("completion_status").HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.CompletionSource).HasColumnName("completion_source").HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.CompletedAt).HasColumnName("completed_at");
+            entity.Property(x => x.IsArchived).HasColumnName("is_archived").IsRequired();
+            entity.Property(x => x.ArchivedAt).HasColumnName("archived_at");
+            entity.Property(x => x.ArchivedBy).HasColumnName("archived_by").HasMaxLength(180);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.HasIndex(x => new { x.MilestoneId, x.IsArchived, x.CompletionStatus, x.SortOrder });
+            entity.HasOne(x => x.Milestone)
+                .WithMany(x => x.Steps)
+                .HasForeignKey(x => x.MilestoneId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectCostItem>(entity =>
+        {
+            entity.ToTable("project_items");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.StepId).HasColumnName("step_id").IsRequired();
+            entity.Property(x => x.Name).HasColumnName("name").HasMaxLength(260).IsRequired();
+            entity.Property(x => x.PlannedAmount).HasColumnName("planned_amount").HasPrecision(18, 2);
+            entity.Property(x => x.ManualAdjustment).HasColumnName("manual_adjustment").HasPrecision(18, 2);
+            entity.Property(x => x.IsDone).HasColumnName("is_done").IsRequired();
+            entity.Property(x => x.DoneAt).HasColumnName("done_at");
+            entity.Property(x => x.SortOrder).HasColumnName("sort_order").IsRequired();
+            entity.Property(x => x.IsArchived).HasColumnName("is_archived").IsRequired();
+            entity.Property(x => x.ArchivedAt).HasColumnName("archived_at");
+            entity.Property(x => x.ArchivedBy).HasColumnName("archived_by").HasMaxLength(180);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.HasIndex(x => new { x.StepId, x.IsArchived, x.IsDone, x.SortOrder });
+            entity.HasOne(x => x.Step)
+                .WithMany(x => x.Items)
+                .HasForeignKey(x => x.StepId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectPayment>(entity =>
+        {
+            entity.ToTable("project_payments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.ItemId).HasColumnName("item_id").IsRequired();
+            entity.Property(x => x.Amount).HasColumnName("amount").HasPrecision(18, 2);
+            entity.Property(x => x.PaymentDate).HasColumnName("payment_date").IsRequired();
+            entity.Property(x => x.Note).HasColumnName("note").HasMaxLength(400).IsRequired();
+            entity.Property(x => x.IsArchived).HasColumnName("is_archived").IsRequired();
+            entity.Property(x => x.ArchivedAt).HasColumnName("archived_at");
+            entity.Property(x => x.ArchivedBy).HasColumnName("archived_by").HasMaxLength(180);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.HasIndex(x => new { x.ItemId, x.IsArchived, x.PaymentDate });
+            entity.HasOne(x => x.Item)
+                .WithMany(x => x.Payments)
+                .HasForeignKey(x => x.ItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectAttachment>(entity =>
+        {
+            entity.ToTable("project_attachments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.ItemId).HasColumnName("item_id").IsRequired();
+            entity.Property(x => x.PaymentId).HasColumnName("payment_id");
+            entity.Property(x => x.Kind).HasColumnName("kind").HasConversion<string>().HasMaxLength(32).IsRequired();
+            entity.Property(x => x.MimeType).HasColumnName("mime_type").HasMaxLength(120).IsRequired();
+            entity.Property(x => x.SizeBytes).HasColumnName("size_bytes").IsRequired();
+            entity.Property(x => x.OriginalName).HasColumnName("original_name").HasMaxLength(260).IsRequired();
+            entity.Property(x => x.StoredRelativePath).HasColumnName("stored_relative_path").HasMaxLength(1024).IsRequired();
+            entity.Property(x => x.IsRemoved).HasColumnName("is_removed").IsRequired();
+            entity.Property(x => x.RemovedAt).HasColumnName("removed_at");
+            entity.Property(x => x.RemovedBy).HasColumnName("removed_by").HasMaxLength(180);
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+            entity.HasIndex(x => new { x.ItemId, x.IsRemoved, x.Kind, x.CreatedAt });
+            entity.HasOne(x => x.Item)
+                .WithMany(x => x.Attachments)
+                .HasForeignKey(x => x.ItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Payment)
+                .WithMany(x => x.Attachments)
+                .HasForeignKey(x => x.PaymentId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
     }

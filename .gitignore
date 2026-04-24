@@ -4,6 +4,7 @@
 .env.*
 !.env.example
 **/bin/
+**/bin\\Debug/
 **/obj/
 web/node_modules/
 web/.next/

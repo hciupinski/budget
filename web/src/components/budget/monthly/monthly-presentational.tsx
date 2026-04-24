@@ -25,9 +25,9 @@ export function MonthlyMetricCard({
   return (
     <div className={`ui-surface rounded-[20px] border p-4 ${danger ? "border-[#f43f5e]" : "ui-border"}`}>
       <p className="ui-text-muted text-sm tracking-wide md:text-base">{label}</p>
-      <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(planned)}</p>
+      <p className={`mt-1 text-2xl font-medium md:text-3xl ${valueTone}`}>{asCurrency(actual)}</p>
       <p className="ui-text-muted mt-1 text-sm md:text-base">
-        Actual: <span className={valueTone}>{asCurrency(actual)}</span>
+        Planned: <span className={valueTone}>{asCurrency(planned)}</span>
       </p>
     </div>
   );

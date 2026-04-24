@@ -16,6 +16,7 @@ Local-first budgeting app with secure owner login, annual planning matrix, month
    - `OWNER_PASSWORD`
    - `OWNER_PASSWORD_HASH` (recommended for production; keep legacy plaintext only during transition)
    - `JWT_SECRET`
+   - `PROJECT_DOCUMENTS_ROOT` (absolute host path for project attachments, e.g. `/Users/<you>/.budget-documents`)
    - (optional) host ports like `WEB_HOST_PORT`, `API_HOST_PORT`, `DB_HOST_PORT` if you want custom mappings
 3. Start stack:
    - `docker compose up --build`
@@ -25,6 +26,7 @@ Local-first budgeting app with secure owner login, annual planning matrix, month
 - Annual Planner page: `http://localhost:13000/annual`
 - Monthly Workspace page: `http://localhost:13000/monthly`
 - Accounts page: `http://localhost:13000/accounts`
+- Projects page: `http://localhost:13000/projects`
 - API health: `http://localhost:18080/healthz`
 - Worker health: `http://localhost:18082/healthz`
 - Adminer: `http://localhost:18081`
@@ -55,6 +57,14 @@ The web container binds on `0.0.0.0:3000` internally and is published on `WEB_HO
 4. Add brokerage holdings and refresh market prices.
 5. Optionally set manual price overrides for holdings.
 6. Create savings goals and track progress.
+
+## Projects workflow
+1. Open **Projects** and create a project in a single currency.
+2. Add milestones, then steps, then cost items.
+3. Track planned cost, manual adjustment, and payments per item.
+4. Upload agreements/receipts/documents to items.
+5. Mark steps and milestones done, or switch them back to active.
+6. Use archive actions to remove entities from active lists (data stays soft-deleted; files are renamed with `xdel_` prefix).
 
 If routes/features do not appear after code changes, rebuild containers:
 - `docker compose up --build`

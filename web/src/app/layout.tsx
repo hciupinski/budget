@@ -3,7 +3,13 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Budget App",
-  description: "Local-first budgeting workspace"
+  description: "Local-first budgeting workspace",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [{ url: "/icon", type: "image/png" }],
+    apple: [{ url: "/apple-icon", type: "image/png" }],
+    shortcut: [{ url: "/icon", type: "image/png" }]
+  }
 };
 
 const themeInitScript = `

@@ -37,7 +37,7 @@ export async function proxyBudgetApi(path: string, init: RequestInit = {}): Prom
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
 
-  if (init.body && !headers.has("Content-Type")) {
+  if (typeof init.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -47,14 +47,19 @@ export async function proxyBudgetApi(path: string, init: RequestInit = {}): Prom
     cache: "no-store"
   });
 
-  const text = await response.text();
-  const contentType = response.headers.get("content-type") ?? "application/json";
+  const responseHeaders = new Headers();
+  const contentType = response.headers.get("content-type");
+  const contentDisposition = response.headers.get("content-disposition");
+  if (contentType) {
+    responseHeaders.set("content-type", contentType);
+  }
+  if (contentDisposition) {
+    responseHeaders.set("content-disposition", contentDisposition);
+  }
 
-  const nextResponse = new NextResponse(text, {
+  const nextResponse = new NextResponse(response.body, {
     status: response.status,
-    headers: {
-      "content-type": contentType
-    }
+    headers: responseHeaders
   });
 
   if (response.status === 401) {

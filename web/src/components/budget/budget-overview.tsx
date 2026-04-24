@@ -172,94 +172,199 @@ export function BudgetOverview() {
   }, []);
 
   const monthMetrics = useMemo(() => {
+    const emptyMetrics = {
+      businessIncome: 0,
+      businessExpenses: 0,
+      transferToPersonal: 0,
+      personalExpenses: 0,
+      savings: 0,
+      investments: 0
+    };
+
     if (!annualPlan) {
-      return {
-        businessIncome: 8500,
-        businessExpenses: 1235,
-        transferToPersonal: 7265,
-        personalExpenses: 3350,
-        savings: 800,
-        investments: 1500
-      };
+      return emptyMetrics;
     }
 
     const rows = annualPlan.categories;
     const monthIndex = month - 1;
 
-    const businessIncome = rows
-      .filter((row) => resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "INCOME")
+    const businessIncomePlanned = rows
+      .filter((row) => {
+        const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+        return resolveManagedSection(row.section, displayName, sectionSettings).kind === "INCOME";
+      })
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
-    const businessExpenses = rows
-      .filter((row) =>
-        resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "BUSINESS_EXPENSES"
-      )
+    const businessExpensesPlanned = rows
+      .filter((row) => {
+        const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+        return resolveManagedSection(row.section, displayName, sectionSettings).kind === "BUSINESS_EXPENSES";
+      })
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
-    const personalExpenses = rows
-      .filter((row) =>
-        resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "PERSONAL_EXPENSES"
-      )
+    const personalExpensesPlanned = rows
+      .filter((row) => {
+        const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+        return resolveManagedSection(row.section, displayName, sectionSettings).kind === "PERSONAL_EXPENSES";
+      })
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
-    const savings = rows
-      .filter((row) => resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "SAVINGS")
+    const savingsPlanned = rows
+      .filter((row) => {
+        const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+        return resolveManagedSection(row.section, displayName, sectionSettings).kind === "SAVINGS";
+      })
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
-    const investments = rows
-      .filter((row) => resolveManagedSection(row.section, row.categoryName, sectionSettings).kind === "INVESTMENTS")
+    const investmentsPlanned = rows
+      .filter((row) => {
+        const displayName = nameOverrides[row.categoryId] ?? row.categoryName;
+        return resolveManagedSection(row.section, displayName, sectionSettings).kind === "INVESTMENTS";
+      })
       .reduce((sum, row) => sum + (row.months[monthIndex] ?? 0), 0);
 
     const customRows = annualCustomItems.filter((item) => item.year === year);
 
-    let customIncome = 0;
-    let customBusinessExpenses = 0;
-    let customPersonalExpenses = 0;
-    let customSavings = 0;
-    let customInvestments = 0;
+    let customIncomePlanned = 0;
+    let customBusinessExpensesPlanned = 0;
+    let customPersonalExpensesPlanned = 0;
+    let customSavingsPlanned = 0;
+    let customInvestmentsPlanned = 0;
 
     for (const customRow of customRows) {
-      const resolved = resolveManagedSection(
-        customRow.sectionKind === "INCOME"
-          ? "INCOME"
-          : customRow.sectionKind === "BUSINESS_EXPENSES" || customRow.sectionKind === "PERSONAL_EXPENSES"
-            ? "COSTS"
-            : "SAVINGS_INVESTMENTS",
-        customRow.name,
+      const resolved = resolveCustomSection(
+        {
+          sectionId: customRow.sectionId,
+          sectionKind: customRow.sectionKind
+        },
         sectionSettings
       );
       const monthValue = customRow.months[monthIndex] ?? 0;
 
       if (resolved.kind === "INCOME") {
-        customIncome += monthValue;
+        customIncomePlanned += monthValue;
       }
 
       if (resolved.kind === "BUSINESS_EXPENSES") {
-        customBusinessExpenses += monthValue;
+        customBusinessExpensesPlanned += monthValue;
       }
 
       if (resolved.kind === "PERSONAL_EXPENSES") {
-        customPersonalExpenses += monthValue;
+        customPersonalExpensesPlanned += monthValue;
       }
 
       if (resolved.kind === "SAVINGS") {
-        customSavings += monthValue;
+        customSavingsPlanned += monthValue;
       }
 
       if (resolved.kind === "INVESTMENTS") {
-        customInvestments += monthValue;
+        customInvestmentsPlanned += monthValue;
+      }
+    }
+
+    const plannedMetrics = {
+      businessIncome: businessIncomePlanned + customIncomePlanned,
+      businessExpenses: businessExpensesPlanned + customBusinessExpensesPlanned,
+      transferToPersonal:
+        (businessIncomePlanned + customIncomePlanned) - (businessExpensesPlanned + customBusinessExpensesPlanned),
+      personalExpenses: personalExpensesPlanned + customPersonalExpensesPlanned,
+      savings: savingsPlanned + customSavingsPlanned,
+      investments: investmentsPlanned + customInvestmentsPlanned
+    };
+
+    const currentWorkspace = monthlyWorkspaces.find((workspace) => workspace.year === year && workspace.month === month);
+    if (!currentWorkspace) {
+      return plannedMetrics;
+    }
+
+    let businessIncomeActual = 0;
+    let businessExpensesActual = 0;
+    let personalExpensesActual = 0;
+    let savingsActual = 0;
+    let investmentsActual = 0;
+
+    for (const action of currentWorkspace.actions) {
+      if (hiddenMonthlyApiRows.includes(action.actionId)) {
+        continue;
+      }
+
+      const displayName = nameOverrides[action.categoryId] ?? action.categoryName;
+      const kind = resolveManagedSection(action.section, displayName, sectionSettings).kind;
+      const actualValue = resolveActualAmount(action.status, action.actualAmount, action.plannedAmount);
+
+      if (kind === "INCOME") {
+        businessIncomeActual += actualValue;
+      }
+
+      if (kind === "BUSINESS_EXPENSES") {
+        businessExpensesActual += actualValue;
+      }
+
+      if (kind === "PERSONAL_EXPENSES") {
+        personalExpensesActual += actualValue;
+      }
+
+      if (kind === "SAVINGS") {
+        savingsActual += actualValue;
+      }
+
+      if (kind === "INVESTMENTS") {
+        investmentsActual += actualValue;
+      }
+    }
+
+    const monthlyCustomForCurrentPeriod = monthlyCustomItems.filter((item) => item.year === year && item.month === month);
+
+    for (const customItem of monthlyCustomForCurrentPeriod) {
+      const resolved = resolveCustomSection(
+        {
+          sectionId: customItem.sectionId,
+          sectionKind: customItem.sectionKind
+        },
+        sectionSettings
+      );
+      const actualValue = resolveActualAmount(customItem.status, customItem.actualAmount, customItem.plannedAmount);
+
+      if (resolved.kind === "INCOME") {
+        businessIncomeActual += actualValue;
+      }
+
+      if (resolved.kind === "BUSINESS_EXPENSES") {
+        businessExpensesActual += actualValue;
+      }
+
+      if (resolved.kind === "PERSONAL_EXPENSES") {
+        personalExpensesActual += actualValue;
+      }
+
+      if (resolved.kind === "SAVINGS") {
+        savingsActual += actualValue;
+      }
+
+      if (resolved.kind === "INVESTMENTS") {
+        investmentsActual += actualValue;
       }
     }
 
     return {
-      businessIncome: businessIncome + customIncome,
-      businessExpenses: businessExpenses + customBusinessExpenses,
-      transferToPersonal: (businessIncome + customIncome) - (businessExpenses + customBusinessExpenses),
-      personalExpenses: personalExpenses + customPersonalExpenses,
-      savings: savings + customSavings,
-      investments: investments + customInvestments
+      businessIncome: businessIncomeActual,
+      businessExpenses: businessExpensesActual,
+      transferToPersonal: businessIncomeActual - businessExpensesActual,
+      personalExpenses: personalExpensesActual,
+      savings: savingsActual,
+      investments: investmentsActual
     };
-  }, [annualCustomItems, annualPlan, month, sectionSettings, year]);
+  }, [
+    annualCustomItems,
+    annualPlan,
+    hiddenMonthlyApiRows,
+    month,
+    monthlyCustomItems,
+    monthlyWorkspaces,
+    nameOverrides,
+    sectionSettings,
+    year
+  ]);
 
   const brokerageMetricsByAccountId = useMemo(
     () => calculateBrokerageMetrics(assetsOverview?.accounts ?? [], investmentsOverview?.holdings ?? []),

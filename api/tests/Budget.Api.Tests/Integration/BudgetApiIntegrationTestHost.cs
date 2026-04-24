@@ -4,9 +4,11 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Budget.Api.Infrastructure.Persistence;
+using Budget.Api.Infrastructure.Storage;
 using Budget.Api.Modules.Auth;
 using Budget.Api.Modules.Budget;
 using Budget.Api.Modules.Budget.Services;
+using Budget.Api.Modules.Budget.Services.Projects;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
@@ -31,6 +33,8 @@ public sealed class BudgetApiIntegrationTestHost : IAsyncDisposable
         _app = app;
     }
 
+    public IServiceProvider Services => _app.Services;
+
     public static async Task<BudgetApiIntegrationTestHost> StartAsync()
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -50,7 +54,9 @@ public sealed class BudgetApiIntegrationTestHost : IAsyncDisposable
             ["Jwt:Issuer"] = "budget-tests",
             ["Jwt:Audience"] = "budget-tests",
             ["Jwt:Secret"] = "integration-tests-secret-with-min-32-chars",
-            ["Jwt:ExpiresMinutes"] = "120"
+            ["Jwt:ExpiresMinutes"] = "120",
+            ["ProjectDocuments:RootPath"] = Path.Combine(Path.GetTempPath(), $"budget-project-docs-it-{Guid.NewGuid():N}"),
+            ["ProjectDocuments:MaxFileSizeBytes"] = "26214400"
         });
 
         builder.Services.AddProblemDetails();
@@ -91,9 +97,14 @@ public sealed class BudgetApiIntegrationTestHost : IAsyncDisposable
         builder.Services.AddScoped<IAuditService, AuditService>();
         builder.Services.AddScoped<IAccountsService, AccountsService>();
         builder.Services.AddScoped<IInvestmentsService, InvestmentsService>();
+        builder.Services.AddScoped<IProjectPlannerService, ProjectPlannerService>();
+        builder.Services.AddScoped<IProjectDocumentStorage, ProjectDocumentStorage>();
         builder.Services.AddMemoryCache();
         builder.Services.AddOptions<MarketPricesOptions>()
             .Bind(builder.Configuration.GetSection(MarketPricesOptions.SectionName))
+            .ValidateDataAnnotations();
+        builder.Services.AddOptions<ProjectDocumentsOptions>()
+            .Bind(builder.Configuration.GetSection(ProjectDocumentsOptions.SectionName))
             .ValidateDataAnnotations();
         builder.Services.AddSingleton<IMarketPriceService, MarketPriceService>();
         builder.Services.AddHttpClient("fx-rates");

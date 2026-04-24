@@ -10,6 +10,7 @@ import {
   ArrowRightIcon,
   AccountsIcon,
   AppLogoIcon,
+  BusinessIcon,
   CalendarIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -49,6 +50,12 @@ const NAV_ITEMS = [
     label: "Accounts",
     aliases: ["/accounts"],
     icon: AccountsIcon
+  },
+  {
+    href: "/projects",
+    label: "Projects",
+    aliases: ["/projects"],
+    icon: BusinessIcon
   },
   {
     href: "/settings",
